@@ -61,8 +61,7 @@ socket.on('game_over', ({ winnerSlot }) => {
 });
 
 function updateHpBars() {
- Object.values(players).forEach(p => {...})
- 
+  Object.values(players).forEach(p => {
     if (hpBars[p.slot]) hpBars[p.slot].style.width = p.hp + '%';
   });
 }
@@ -70,7 +69,7 @@ function updateHpBars() {
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   const scale = canvas.width / 800;
-Object.values(players).forEach((p) => {
+  Object.values(players).forEach((p) => {
     const x = p.x * scale;
     const y = canvas.height - 5;
     const color = p.slot === 0 ? '#4a7c59' : '#7c4a4a';
@@ -112,7 +111,6 @@ Object.values(players).forEach((p) => {
     ctx.lineTo(x + 20 * p.facing + swordLen, y - 45 - (attackFlashSlot === p.slot ? 20 : 0));
     ctx.stroke();
   });
-
 
   requestAnimationFrame(draw);
 }
