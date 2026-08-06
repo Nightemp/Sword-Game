@@ -1,57 +1,212 @@
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-<title>Дуэль на мечах</title>
-<script src="https://telegram.org/js/telegram-web-app.js"></script>
-<style>
-  html, body {
-    margin: 0; padding: 0; height: 100%; overflow: hidden;
-    background: #1a1410; font-family: sans-serif; touch-action: none;
-    -webkit-user-select: none; user-select: none;
-  }
-  #arena { display: block; width: 100%; height: 70vh; background: linear-gradient(#3a2f28, #5b4636); }
-  #hud { position: absolute; top: 10px; left: 0; right: 0; display: flex; justify-content: space-between; padding: 0 16px; }
-  .hp-bar { width: 40%; height: 16px; background: #333; border-radius: 8px; overflow: hidden; border: 1px solid #000; }
-  .hp-fill { height: 100%; background: #d62828; transition: width 0.2s; }
-  #controls {
-    position: fixed; bottom: 0; left: 0; right: 0; height: 30vh;
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 0 20px; box-sizing: border-box;
-  }
-  #joystick-zone {
-    width: 130px; height: 130px; border-radius: 50%;
-    background: rgba(255,255,255,0.08); position: relative;
-  }
-  #joystick-knob {
-    width: 60px; height: 60px; border-radius: 50%;
-    background: rgba(255,255,255,0.35); position: absolute;
-    top: 35px; left: 35px; pointer-events: none;
-  }
-  #attack-btn {
-    width: 110px; height: 110px; border-radius: 50%;
-    background: #d62828; color: white; font-size: 16px; font-weight: bold;
-    border: 3px solid #7a1414; display: flex; align-items: center; justify-content: center;
-  }
-  #attack-btn:active { background: #a91d1d; }
-  #status { position: absolute; top: 40%; left: 0; right: 0; text-align: center; color: white; font-size: 20px; }
-</style>
-</head>
-<body>
-  <div id="hud">
-    <div class="hp-bar"><div id="hp0" class="hp-fill" style="width:100%"></div></div>
-    <div class="hp-bar"><div id="hp1" class="hp-fill" style="width:100%"></div></div>
-  </div>
-  <canvas id="arena"></canvas>
-  <div id="status"></div>
+const tg = window.Telegram?.WebApp;
+if (tg) { tg.ready(); tg.expand(); }
 
-  <div id="controls">
-    <div id="joystick-zone"><div id="joystick-knob"></div></div>
-    <div id="attack-btn">УДАР</div>
-  </div>
+const params = new URLSearchParams(location.search);
+const roomId = params.get('room') || tg?.initDataUnsafe?.start_param || 'default';
 
-  <script src="/socket.io/socket.io.js"></script>
-  <script src="game.js"></script>
-</body>
-</html>
+const canvas = document.getElementById('arena');
+const ctx = canvas.getContext('2d');
+function resize() {
+  canvas.width = canvas.clientWidth;
+  canvas.height = canvas.clientHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+const statusEl = document.getElementById('status');
+const hpBars = [document.getElementById('hp0'), document.getElementById('hp1')];
+
+let mySlot = null;
+let players = {};
+let attackFlashSlot = null;
+let prevHp = {};
+let bloodEffects = [];
+
+function spawnBlood(x, y) {
+  for (let i = 0; i < 12; i++) {
+    bloodEffects.push({
+      x, y,
+      vx: (Math.random() - 0.5) * 4,
+      vy: -Math.random() * 3 - 1,
+      life: 30,
+      size: Math.random() * 3 + 2
+    });
+  }
+}
+
+const socket = io();
+socket.emit('join_room', { roomId });
+
+socket.on('joined', (data) => {
+  mySlot = data.slot;
+  players = data.players;
+  statusEl.textContent = 'Ждём соперника...';
+});
+
+socket.on('opponent_joined', (data) => {
+  players = data.players;
+});
+
+socket.on('start_game', (data) => {
+  players = data.players;
+  statusEl.textContent = '';
+});
+
+socket.on('state_update', (p) => {
+  const scale = canvas.width / 800;
+  Object.values(p).forEach(np => {
+    const old = prevHp[np.slot];
+    if (old !== undefined && np.hp < old) {
+      spawnBlood(np.x * scale, canvas.height - 65);
+    }
+    prevHp[np.slot] = np.hp;
+  });
+  players = p;
+  updateHpBars();
+});
+
+socket.on('attack_anim', ({ slot }) => {
+  attackFlashSlot = slot;
+  setTimeout(() => (attackFlashSlot = null), 200);
+});
+
+socket.on('room_full', () => {
+  statusEl.textContent = 'Комната уже занята';
+});
+
+socket.on('opponent_left', () => {
+  statusEl.textContent = 'Соперник вышел из боя';
+});
+
+socket.on('game_over', ({ winnerSlot }) => {
+  statusEl.textContent = winnerSlot === mySlot ? '🏆 Победа!' : '💀 Поражение';
+});
+
+function updateHpBars() {
+  Object.values(players).forEach(p => {
+    if (hpBars[p.slot]) hpBars[p.slot].style.width = p.hp + '%';
+  });
+}
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const scale = canvas.width / 800;
+  Object.values(players).forEach((p) => {
+    const x = p.x * scale;
+    const y = canvas.height - 5;
+    const color = p.slot === 0 ? '#4a7c59' : '#7c4a4a';
+
+    // ноги
+    ctx.fillStyle = '#2b2320';
+    ctx.fillRect(x - 12, y - 25, 9, 25);
+    ctx.fillRect(x + 3, y - 25, 9, 25);
+
+    // тело
+    ctx.fillStyle = color;
+    ctx.fillRect(x - 15, y - 60, 30, 40);
+
+    // руки
+    ctx.fillStyle = color;
+    ctx.fillRect(x - 20, y - 58, 6, 28);
+    ctx.fillRect(x + 14, y - 58, 6, 28);
+
+    // голова
+    ctx.fillStyle = '#e8b88a';
+    ctx.beginPath();
+    ctx.arc(x, y - 75, 15, 0, Math.PI * 2);
+    ctx.fill();
+
+    // глаза
+    ctx.fillStyle = '#1a1410';
+    const eyeShift = p.facing * 4;
+    ctx.beginPath();
+    ctx.arc(x + eyeShift - 3, y - 77, 1.8, 0, Math.PI * 2);
+    ctx.arc(x + eyeShift + 3, y - 77, 1.8, 0, Math.PI * 2);
+    ctx.fill();
+
+    // меч
+    ctx.strokeStyle = attackFlashSlot === p.slot ? '#ffe066' : '#cfd8dc';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    const swordLen = 40 * p.facing;
+    ctx.moveTo(x + 20 * p.facing, y - 45);
+    ctx.lineTo(x + 20 * p.facing + swordLen, y - 45 - (attackFlashSlot === p.slot ? 20 : 0));
+    ctx.stroke();
+  });
+
+  // кровь
+  ctx.fillStyle = '#a11d1d';
+  bloodEffects.forEach(b => {
+    ctx.globalAlpha = Math.max(b.life / 30, 0);
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, b.size, 0, Math.PI * 2);
+    ctx.fill();
+    b.x += b.vx;
+    b.y += b.vy;
+    b.vy += 0.2; // гравитация
+    b.life--;
+  });
+  ctx.globalAlpha = 1;
+  bloodEffects = bloodEffects.filter(b => b.life > 0);
+
+  requestAnimationFrame(draw);
+}
+draw();
+
+const zone = document.getElementById('joystick-zone');
+const knob = document.getElementById('joystick-knob');
+let dragging = false;
+let moveInterval = null;
+let currentDir = 0;
+
+function setKnob(dx) {
+  const max = 35;
+  const clampedX = Math.max(-max, Math.min(max, dx));
+  knob.style.left = 35 + clampedX + 'px';
+  knob.style.top = '35px';
+}
+
+function startMoveLoop() {
+  if (moveInterval) return;
+  moveInterval = setInterval(() => {
+    if (currentDir !== 0) socket.emit('move', { dir: currentDir });
+  }, 50);
+}
+function stopMoveLoop() {
+  clearInterval(moveInterval);
+  moveInterval = null;
+}
+
+function handleStart() {
+  dragging = true;
+  startMoveLoop();
+}
+function handleMove(e) {
+  if (!dragging) return;
+  const touch = e.touches ? e.touches[0] : e;
+  const rect = zone.getBoundingClientRect();
+  const dx = touch.clientX - (rect.left + rect.width / 2);
+  setKnob(dx);
+  currentDir = dx > 15 ? 1 : dx < -15 ? -1 : 0;
+}
+function handleEnd() {
+  dragging = false;
+  currentDir = 0;
+  knob.style.left = '35px';
+  stopMoveLoop();
+}
+
+zone.addEventListener('touchstart', handleStart);
+zone.addEventListener('touchmove', handleMove);
+zone.addEventListener('touchend', handleEnd);
+zone.addEventListener('mousedown', handleStart);
+window.addEventListener('mousemove', handleMove);
+window.addEventListener('mouseup', handleEnd);
+
+const attackBtn = document.getElementById('attack-btn');
+function doAttack(e) {
+  e.preventDefault();
+  socket.emit('attack');
+}
+attackBtn.addEventListener('touchstart', doAttack);
+attackBtn.addEventListener('mousedown', doAttack);
