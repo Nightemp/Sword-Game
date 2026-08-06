@@ -72,7 +72,7 @@ function draw() {
 
   Object.values(players).forEach((p) => {
     const x = p.x * scale;
-    const y = canvas.height - 60;
+    const y = canvas.height -10;
     const color = p.slot === 0 ? '#4a7c59' : '#7c4a4a';
 // ноги
     ctx.fillStyle = '#2b2320';
