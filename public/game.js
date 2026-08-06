@@ -111,28 +111,7 @@ Object.values(players).forEach((p) => {
     ctx.lineTo(x + 20 * p.facing + swordLen, y - 45 - (attackFlashSlot === p.slot ? 20 : 0));
     ctx.stroke();
   });
-// ноги
-    ctx.fillStyle = '#2b2320';
-    ctx.fillRect(x - 12, y - 25, 9, 25);
-    ctx.fillRect(x + 3, y - 25, 9, 25);
 
-    // тело
-    ctx.fillStyle = color;
-    ctx.fillRect(x - 15, y - 60, 30, 40);
-    
-  
-    ctx.beginPath();
-    ctx.arc(x, y - 75, 15, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.strokeStyle = attackFlashSlot === p.slot ? '#ffe066' : '#cfd8dc';
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    const swordLen = 40 * p.facing;
-    ctx.moveTo(x + 15 * p.facing, y - 40);
-    ctx.lineTo(x + 15 * p.facing + swordLen, y - 40 - (attackFlashSlot === p.slot ? 20 : 0));
-    ctx.stroke();
-  });
 
   requestAnimationFrame(draw);
 }
