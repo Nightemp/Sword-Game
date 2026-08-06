@@ -19,6 +19,20 @@ const hpBars = [document.getElementById('hp0'), document.getElementById('hp1')];
 let mySlot = null;
 let players = {};
 let attackFlashSlot = null;
+let prevHp = {};
+let bloodEffects = [];
+
+function spawnBlood(x, y) {
+  for (let i = 0; i < 12; i++) {
+    bloodEffects.push({
+      x, y,
+      vx: (Math.random() - 0.5) * 4,
+      vy: -Math.random() * 3 - 1,
+      life: 30,
+      size: Math.random() * 3 + 2
+    });
+  }
+}
 
 const socket = io();
 socket.emit('join_room', { roomId });
@@ -39,6 +53,14 @@ socket.on('start_game', (data) => {
 });
 
 socket.on('state_update', (p) => {
+  const scale = canvas.width / 800;
+  Object.values(p).forEach(np => {
+    const old = prevHp[np.slot];
+    if (old !== undefined && np.hp < old) {
+      spawnBlood(np.x * scale, canvas.height - 65);
+    }
+    prevHp[np.slot] = np.hp;
+  });
   players = p;
   updateHpBars();
 });
@@ -112,6 +134,21 @@ function draw() {
     ctx.stroke();
   });
 
+  // кровь
+  ctx.fillStyle = '#a11d1d';
+  bloodEffects.forEach(b => {
+    ctx.globalAlpha = Math.max(b.life / 30, 0);
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, b.size, 0, Math.PI * 2);
+    ctx.fill();
+    b.x += b.vx;
+    b.y += b.vy;
+    b.vy += 0.2; // гравитация
+    b.life--;
+  });
+  ctx.globalAlpha = 1;
+  bloodEffects = bloodEffects.filter(b => b.life > 0);
+
   requestAnimationFrame(draw);
 }
 draw();
@@ -127,49 +164,3 @@ function setKnob(dx) {
   const clampedX = Math.max(-max, Math.min(max, dx));
   knob.style.left = 35 + clampedX + 'px';
   knob.style.top = '35px';
-}
-
-function startMoveLoop() {
-  if (moveInterval) return;
-  moveInterval = setInterval(() => {
-    if (currentDir !== 0) socket.emit('move', { dir: currentDir });
-  }, 50);
-}
-function stopMoveLoop() {
-  clearInterval(moveInterval);
-  moveInterval = null;
-}
-
-function handleStart() {
-  dragging = true;
-  startMoveLoop();
-}
-function handleMove(e) {
-  if (!dragging) return;
-  const touch = e.touches ? e.touches[0] : e;
-  const rect = zone.getBoundingClientRect();
-  const dx = touch.clientX - (rect.left + rect.width / 2);
-  setKnob(dx);
-  currentDir = dx > 15 ? 1 : dx < -15 ? -1 : 0;
-}
-function handleEnd() {
-  dragging = false;
-  currentDir = 0;
-  knob.style.left = '35px';
-  stopMoveLoop();
-}
-
-zone.addEventListener('touchstart', handleStart);
-zone.addEventListener('touchmove', handleMove);
-zone.addEventListener('touchend', handleEnd);
-zone.addEventListener('mousedown', handleStart);
-window.addEventListener('mousemove', handleMove);
-window.addEventListener('mouseup', handleEnd);
-
-const attackBtn = document.getElementById('attack-btn');
-function doAttack(e) {
-  e.preventDefault();
-  socket.emit('attack');
-}
-attackBtn.addEventListener('touchstart', doAttack);
-attackBtn.addEventListener('mousedown', doAttack);
