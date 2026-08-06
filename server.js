@@ -65,7 +65,7 @@ io.on('connection', (socket) => {
     const room = rooms.get(roomId);
     if (!room || !room.players[socket.id]) return;
     const p = room.players[socket.id];
-    const speed = 6;
+    const speed = 10;
     p.x += dir * speed;
     p.x = Math.max(20, Math.min(ARENA_WIDTH - 20, p.x));
     p.facing = dir !== 0 ? dir : p.facing;
