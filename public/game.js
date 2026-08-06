@@ -12,6 +12,10 @@ function resize() {
 }
 window.addEventListener('resize', resize);
 resize();
+setTimeout(resize, 300);
+if (tg) {
+  tg.onEvent('viewportChanged', resize);
+}
 
 const statusEl = document.getElementById('status');
 const hpBars = [document.getElementById('hp0'), document.getElementById('hp1')];
@@ -19,6 +23,20 @@ const hpBars = [document.getElementById('hp0'), document.getElementById('hp1')];
 let mySlot = null;
 let players = {};
 let attackFlashSlot = null;
+let prevHp = {};
+let bloodEffects = [];
+
+function spawnBlood(x, y) {
+  for (let i = 0; i < 12; i++) {
+    bloodEffects.push({
+      x, y,
+      vx: (Math.random() - 0.5) * 4,
+      vy: -Math.random() * 3 - 1,
+      life: 30,
+      size: Math.random() * 3 + 2
+    });
+  }
+}
 
 const socket = io();
 socket.emit('join_room', { roomId });
@@ -39,13 +57,21 @@ socket.on('start_game', (data) => {
 });
 
 socket.on('state_update', (p) => {
+  const scale = canvas.width / 800;
+  Object.values(p).forEach(np => {
+    const old = prevHp[np.slot];
+    if (old !== undefined && np.hp < old) {
+      spawnBlood(np.x * scale, canvas.height - 65);
+    }
+    prevHp[np.slot] = np.hp;
+  });
   players = p;
   updateHpBars();
 });
 
 socket.on('attack_anim', ({ slot }) => {
   attackFlashSlot = slot;
-  setTimeout(() => (attackFlashSlot = null), 120);
+  setTimeout(() => (attackFlashSlot = null), 200);
 });
 
 socket.on('room_full', () => {
@@ -61,7 +87,7 @@ socket.on('game_over', ({ winnerSlot }) => {
 });
 
 function updateHpBars() {
-  Object.values(players).forEach((p) => {
+  Object.values(players).forEach(p => {
     if (hpBars[p.slot]) hpBars[p.slot].style.width = p.hp + '%';
   });
 }
@@ -69,7 +95,6 @@ function updateHpBars() {
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   const scale = canvas.width / 800;
-
   Object.values(players).forEach((p) => {
     const x = p.x * scale;
     const y = canvas.height - 5;
@@ -112,6 +137,21 @@ function draw() {
     ctx.lineTo(x + 20 * p.facing + swordLen, y - 45 - (attackFlashSlot === p.slot ? 20 : 0));
     ctx.stroke();
   });
+
+  // кровь
+  ctx.fillStyle = '#a11d1d';
+  bloodEffects.forEach(b => {
+    ctx.globalAlpha = Math.max(b.life / 30, 0);
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, b.size, 0, Math.PI * 2);
+    ctx.fill();
+    b.x += b.vx;
+    b.y += b.vy;
+    b.vy += 0.2; // гравитация
+    b.life--;
+  });
+  ctx.globalAlpha = 1;
+  bloodEffects = bloodEffects.filter(b => b.life > 0);
 
   requestAnimationFrame(draw);
 }
