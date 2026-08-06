@@ -74,9 +74,16 @@ function draw() {
     const x = p.x * scale;
     const y = canvas.height - 60;
     const color = p.slot === 0 ? '#4a7c59' : '#7c4a4a';
+// ноги
+    ctx.fillStyle = '#2b2320';
+    ctx.fillRect(x - 12, y - 25, 9, 25);
+    ctx.fillRect(x + 3, y - 25, 9, 25);
 
+    // тело
     ctx.fillStyle = color;
-    ctx.fillRect(x - 15, y - 60, 30, 60);
+    ctx.fillRect(x - 15, y - 60, 30, 40);
+    
+  
     ctx.beginPath();
     ctx.arc(x, y - 75, 15, 0, Math.PI * 2);
     ctx.fill();
