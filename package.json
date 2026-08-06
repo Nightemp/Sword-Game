@@ -1,0 +1,14 @@
+{
+  "name": "sword-duel-bot",
+  "version": "1.0.0",
+  "description": "Telegram Mini App - дуэль на мечах 1 на 1",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5",
+    "telegraf": "^4.16.3"
+  }
+}
