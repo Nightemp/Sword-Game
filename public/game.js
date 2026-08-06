@@ -164,10 +164,10 @@ let moveInterval = null;
 let currentDir = 0;
 
 function setKnob(dx) {
-  const max = 35;
+  const max = 45;
   const clampedX = Math.max(-max, Math.min(max, dx));
-  knob.style.left = 35 + clampedX + 'px';
-  knob.style.top = '35px';
+  knob.style.left = 51 + clampedX + 'px';
+  knob.style.top = '51px';
 }
 
 function startMoveLoop() {
@@ -196,7 +196,7 @@ function handleMove(e) {
 function handleEnd() {
   dragging = false;
   currentDir = 0;
-  knob.style.left = '35px';
+  knob.style.left = '51px';
   stopMoveLoop();
 }
 
