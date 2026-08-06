@@ -61,7 +61,8 @@ socket.on('game_over', ({ winnerSlot }) => {
 });
 
 function updateHpBars() {
-  Object.values(players).forEach((p) => {
+ Object.values(players).forEach(p => {...})
+ 
     if (hpBars[p.slot]) hpBars[p.slot].style.width = p.hp + '%';
   });
 }
