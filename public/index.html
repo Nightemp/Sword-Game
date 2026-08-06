@@ -12,6 +12,10 @@ function resize() {
 }
 window.addEventListener('resize', resize);
 resize();
+setTimeout(resize, 300);
+if (tg) {
+  tg.onEvent('viewportChanged', resize);
+}
 
 const statusEl = document.getElementById('status');
 const hpBars = [document.getElementById('hp0'), document.getElementById('hp1')];
