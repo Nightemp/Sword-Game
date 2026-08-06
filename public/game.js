@@ -69,11 +69,48 @@ function updateHpBars() {
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   const scale = canvas.width / 800;
-
-  Object.values(players).forEach((p) => {
+Object.values(players).forEach((p) => {
     const x = p.x * scale;
-    const y = canvas.height -10;
+    const y = canvas.height - 5;
     const color = p.slot === 0 ? '#4a7c59' : '#7c4a4a';
+
+    // ноги
+    ctx.fillStyle = '#2b2320';
+    ctx.fillRect(x - 12, y - 25, 9, 25);
+    ctx.fillRect(x + 3, y - 25, 9, 25);
+
+    // тело
+    ctx.fillStyle = color;
+    ctx.fillRect(x - 15, y - 60, 30, 40);
+
+    // руки
+    ctx.fillStyle = color;
+    ctx.fillRect(x - 20, y - 58, 6, 28);
+    ctx.fillRect(x + 14, y - 58, 6, 28);
+
+    // голова
+    ctx.fillStyle = '#e8b88a';
+    ctx.beginPath();
+    ctx.arc(x, y - 75, 15, 0, Math.PI * 2);
+    ctx.fill();
+
+    // глаза
+    ctx.fillStyle = '#1a1410';
+    const eyeShift = p.facing * 4;
+    ctx.beginPath();
+    ctx.arc(x + eyeShift - 3, y - 77, 1.8, 0, Math.PI * 2);
+    ctx.arc(x + eyeShift + 3, y - 77, 1.8, 0, Math.PI * 2);
+    ctx.fill();
+
+    // меч
+    ctx.strokeStyle = attackFlashSlot === p.slot ? '#ffe066' : '#cfd8dc';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    const swordLen = 40 * p.facing;
+    ctx.moveTo(x + 20 * p.facing, y - 45);
+    ctx.lineTo(x + 20 * p.facing + swordLen, y - 45 - (attackFlashSlot === p.slot ? 20 : 0));
+    ctx.stroke();
+  });
 // ноги
     ctx.fillStyle = '#2b2320';
     ctx.fillRect(x - 12, y - 25, 9, 25);
