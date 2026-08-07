@@ -39,7 +39,13 @@ function createRoom(roomId) {
   return rooms.get(roomId);
 }
 
+function broadcastOnlineCount() {
+  io.emit('online_count', io.engine.clientsCount);
+}
+
 io.on('connection', (socket) => {
+  broadcastOnlineCount();
+
   socket.on('join_room', ({ roomId }) => {
     const room = createRoom(roomId);
     if (room.order.length >= 2) {
@@ -106,11 +112,13 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     const roomId = socket.data.roomId;
     const room = rooms.get(roomId);
-    if (!room) return;
-    delete room.players[socket.id];
-    room.order = room.order.filter((id) => id !== socket.id);
-    io.to(roomId).emit('opponent_left');
-    if (room.order.length === 0) rooms.delete(roomId);
+    if (room) {
+      delete room.players[socket.id];
+      room.order = room.order.filter((id) => id !== socket.id);
+      io.to(roomId).emit('opponent_left');
+      if (room.order.length === 0) rooms.delete(roomId);
+    }
+    broadcastOnlineCount();
   });
 });
 
