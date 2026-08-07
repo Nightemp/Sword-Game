@@ -91,6 +91,53 @@
     font-size: 18px;
     font-weight: bold;
   }
+
+  #menu-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(#1c1512, #3a2f28);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+  }
+
+  #menu-title {
+    font-size: 34px;
+    font-weight: bold;
+    letter-spacing: 1px;
+    margin-bottom: 6px;
+    text-shadow: 0 3px 6px rgba(0,0,0,0.6);
+  }
+
+  #menu-subtitle {
+    font-size: 14px;
+    color: rgba(255,255,255,0.6);
+    margin-bottom: 40px;
+    text-align: center;
+    padding: 0 30px;
+  }
+
+  #play-btn {
+    width: 220px;
+    height: 60px;
+    border-radius: 30px;
+    background: linear-gradient(#ffe066, #e0a824);
+    border: none;
+    color: #1a1410;
+    font-size: 20px;
+    font-weight: bold;
+    letter-spacing: 1px;
+    box-shadow: 0 6px 16px rgba(0,0,0,0.4);
+  }
+
+  #play-btn:active {
+    transform: scale(0.97);
+  }
 </style>
 </head>
 <body>
@@ -105,6 +152,12 @@
   <div id="joystick-knob"></div>
 </div>
 <button id="attack-btn">УДАР</button>
+
+<div id="menu-overlay">
+  <div id="menu-title">⚔️ SWORD DUEL</div>
+  <div id="menu-subtitle">Управляй джойстиком слева, бей кнопкой справа.<br>Побеждает тот, кто первым собьёт HP соперника до нуля.</div>
+  <button id="play-btn">ИГРАТЬ</button>
+</div>
 
 <script src="/socket.io/socket.io.js"></script>
 <script src="game.js"></script>
