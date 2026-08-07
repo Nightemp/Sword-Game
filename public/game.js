@@ -39,7 +39,18 @@ function spawnBlood(x, y) {
 }
 
 const socket = io();
-socket.emit('join_room', { roomId });
+
+const menuOverlay = document.getElementById('menu-overlay');
+const playBtn = document.getElementById('play-btn');
+
+playBtn.addEventListener('click', () => {
+  if (playBtn.textContent === 'ИГРАТЬ СНОВА') {
+    location.reload();
+    return;
+  }
+  menuOverlay.style.display = 'none';
+  socket.emit('join_room', { roomId });
+});
 
 socket.on('joined', (data) => {
   mySlot = data.slot;
@@ -84,6 +95,10 @@ socket.on('opponent_left', () => {
 
 socket.on('game_over', ({ winnerSlot }) => {
   statusEl.textContent = winnerSlot === mySlot ? '🏆 Победа!' : '💀 Поражение';
+  setTimeout(() => {
+    playBtn.textContent = 'ИГРАТЬ СНОВА';
+    menuOverlay.style.display = 'flex';
+  }, 1500);
 });
 
 function updateHpBars() {
