@@ -40,6 +40,11 @@ function spawnBlood(x, y) {
 
 const socket = io();
 
+const onlineCountEl = document.getElementById('online-count');
+socket.on('online_count', (count) => {
+  onlineCountEl.textContent = count;
+});
+
 const menuOverlay = document.getElementById('menu-overlay');
 const playBtn = document.getElementById('play-btn');
 
