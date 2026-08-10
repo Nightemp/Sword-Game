@@ -1,165 +1,124 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Sword Duel</title>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+<title>Дуэль на мечах</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
   html, body {
-    margin: 0;
-    padding: 0;
-    width: 100%;
-    height: 100%;
-    background: #14100e;
-    overflow: hidden;
-    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-    color: #fff;
-    user-select: none;
-    touch-action: none;
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: #1a1410; font-family: sans-serif; touch-action: none;
+    -webkit-user-select: none; user-select: none;
   }
-
-  #arena {
-    display: block;
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(#3a2f28, #6b5644);
+  #arena { display: block; width: 100%; height: 70vh; background: linear-gradient(#3a2f28, #5b4636); }
+  #hud { position: absolute; top: 10px; left: 0; right: 0; display: flex; justify-content: space-between; padding: 0 16px; }
+  .hp-bar { width: 40%; height: 16px; background: #333; border-radius: 8px; overflow: hidden; border: 1px solid #000; }
+  .hp-fill { height: 100%; background: #d62828; transition: width 0.15s linear; }
+  #controls {
+    position: fixed; bottom: 0; left: 0; right: 0; height: 30vh;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 20px; box-sizing: border-box;
   }
-
-  #status {
-    position: absolute;
-    top: 50px;
-    left: 50%;
-    transform: translateX(-50%);
-    font-size: 18px;
-    font-weight: bold;
-    text-shadow: 0 2px 4px rgba(0,0,0,0.8);
-    pointer-events: none;
-  }
-
-  .hp-container {
-    position: absolute;
-    top: 12px;
-    width: 40%;
-    height: 14px;
-    background: rgba(0,0,0,0.5);
-    border: 2px solid #fff;
-    border-radius: 7px;
-    overflow: hidden;
-  }
-  #hp0-wrap { left: 12px; }
-  #hp1-wrap { right: 12px; }
-
-  .hp-bar {
-    height: 100%;
-    width: 100%;
-    transition: width 0.15s ease-out;
-  }
-  #hp0 { background: #4a7c59; }
-  #hp1 { background: #7c4a4a; }
-
   #joystick-zone {
-    position: absolute;
-    left: 24px;
-    bottom: 50px;
-    width: 130px;
-    height: 130px;
-    border-radius: 50%;
-    background: rgba(255,255,255,0.15);
-    border: 2px solid rgba(255,255,255,0.3);
+    width: 130px; height: 130px; border-radius: 50%;
+    background: rgba(255,255,255,0.08); position: relative;
   }
   #joystick-knob {
-    position: absolute;
-    left: 51px;
-    top: 51px;
-    width: 28px;
-    height: 28px;
-    border-radius: 50%;
-    background: rgba(255,255,255,0.8);
+    width: 60px; height: 60px; border-radius: 50%;
+    background: rgba(255,255,255,0.35); position: absolute;
+    top: 35px; left: 35px; pointer-events: none;
   }
-
   #attack-btn {
-    position: absolute;
-    right: 24px;
-    bottom: 50px;
-    width: 130px;
-    height: 130px;
-    border-radius: 50%;
-    background: rgba(255,80,80,0.35);
-    border: 2px solid rgba(255,120,120,0.6);
-    color: #fff;
-    font-size: 18px;
-    font-weight: bold;
+    width: 110px; height: 110px; border-radius: 50%;
+    background: #d62828; color: white; font-size: 16px; font-weight: bold;
+    border: 3px solid #7a1414; display: flex; align-items: center; justify-content: center;
   }
+  #attack-btn:active { background: #a91d1d; }
+  #status { position: absolute; top: 40%; left: 0; right: 0; text-align: center; color: white; font-size: 20px; }
 
-  #menu-overlay {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(#1c1512, #3a2f28);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    z-index: 10;
+  /* --- Меню --- */
+  #menu-screen {
+    position: fixed; inset: 0; z-index: 50;
+    background: radial-gradient(ellipse at top, #3a2f28, #100c08);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    color: #eee; text-align: center; gap: 18px;
   }
-
-  #menu-title {
-    font-size: 34px;
-    font-weight: bold;
-    letter-spacing: 1px;
-    margin-bottom: 6px;
-    text-shadow: 0 3px 6px rgba(0,0,0,0.6);
-  }
-
-  #menu-subtitle {
-    font-size: 14px;
-    color: rgba(255,255,255,0.6);
-    margin-bottom: 40px;
-    text-align: center;
-    padding: 0 30px;
-  }
-
+  #menu-screen h1 { font-size: 26px; margin: 0; letter-spacing: 1px; color: #ffe066; text-shadow: 0 2px 6px #000; }
+  #menu-stats { font-size: 14px; color: #ccc; display: flex; gap: 18px; }
+  #menu-stats span { color: #ffe066; font-weight: bold; }
   #play-btn {
-    width: 220px;
-    height: 60px;
-    border-radius: 30px;
-    background: linear-gradient(#ffe066, #e0a824);
-    border: none;
-    color: #1a1410;
-    font-size: 20px;
-    font-weight: bold;
-    letter-spacing: 1px;
-    box-shadow: 0 6px 16px rgba(0,0,0,0.4);
+    padding: 16px 48px; font-size: 18px; font-weight: bold; color: white;
+    background: linear-gradient(#e63946, #a91d1d); border: 2px solid #7a1414;
+    border-radius: 12px;
+  }
+  #play-btn:active { filter: brightness(0.85); }
+  #settings-btn {
+    width: 44px; height: 44px; border-radius: 50%; background: rgba(255,255,255,0.1);
+    color: white; font-size: 20px; border: 1px solid rgba(255,255,255,0.2);
+    position: absolute; top: 20px; right: 20px; display: flex; align-items: center; justify-content: center;
   }
 
-  #play-btn:active {
-    transform: scale(0.97);
+  /* --- Настройки --- */
+  #settings-modal {
+    position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,0.7);
+    display: none; align-items: center; justify-content: center;
   }
+  #settings-modal.open { display: flex; }
+  #settings-box {
+    background: #241c16; border: 1px solid #4a3a2c; border-radius: 14px;
+    padding: 22px; width: 82%; max-width: 340px; color: #eee;
+  }
+  #settings-box h2 { margin: 0 0 16px 0; font-size: 18px; color: #ffe066; }
+  .setting-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-top: 1px solid #3a2f28; }
+  .setting-row:first-of-type { border-top: none; }
+  .setting-row span { font-size: 14px; }
+  .toggle { width: 46px; height: 26px; border-radius: 13px; background: #444; position: relative; flex-shrink: 0; }
+  .toggle.on { background: #d62828; }
+  .toggle-knob { width: 20px; height: 20px; border-radius: 50%; background: white; position: absolute; top: 3px; left: 3px; transition: left 0.15s; }
+  .toggle.on .toggle-knob { left: 23px; }
+  #close-settings { margin-top: 18px; width: 100%; padding: 10px; background: #4a3a2c; color: white; border: none; border-radius: 8px; }
 </style>
 </head>
 <body>
+  <div id="menu-screen">
+    <button id="settings-btn">⚙️</button>
+    <h1>⚔️ Дуэль на мечах</h1>
+    <div id="menu-stats">
+      <div>Онлайн: <span id="stat-online">—</span></div>
+      <div>Сыграно боёв: <span id="stat-games">—</span></div>
+    </div>
+    <button id="play-btn">Играть</button>
+  </div>
 
-<canvas id="arena"></canvas>
-<div id="status"></div>
+  <div id="settings-modal">
+    <div id="settings-box">
+      <h2>Настройки</h2>
+      <div class="setting-row">
+        <span>Звук</span>
+        <div class="toggle on" id="toggle-sound"><div class="toggle-knob"></div></div>
+      </div>
+      <div class="setting-row">
+        <span>Расчленёнка</span>
+        <div class="toggle" id="toggle-gore"><div class="toggle-knob"></div></div>
+      </div>
+      <button id="close-settings">Закрыть</button>
+    </div>
+  </div>
 
-<div id="hp0-wrap" class="hp-container"><div id="hp0" class="hp-bar"></div></div>
-<div id="hp1-wrap" class="hp-container"><div id="hp1" class="hp-bar"></div></div>
+  <div id="hud">
+    <div class="hp-bar"><div id="hp0" class="hp-fill" style="width:100%"></div></div>
+    <div class="hp-bar"><div id="hp1" class="hp-fill" style="width:100%"></div></div>
+  </div>
+  <canvas id="arena"></canvas>
+  <div id="status"></div>
 
-<div id="joystick-zone">
-  <div id="joystick-knob"></div>
-</div>
-<button id="attack-btn">УДАР</button>
+  <div id="controls">
+    <div id="joystick-zone"><div id="joystick-knob"></div></div>
+    <div id="attack-btn">УДАР</div>
+  </div>
 
-<div id="menu-overlay">
-  <div id="menu-title">⚔️ SWORD DUEL</div>
-  <div id="menu-subtitle">Управляй джойстиком слева, бей кнопкой справа.<br>Побеждает тот, кто первым собьёт HP соперника до нуля.</div>
-  <button id="play-btn">ИГРАТЬ</button>
-</div>
-
-<script src="/socket.io/socket.io.js"></script>
-<script src="game.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="game.js"></script>
 </body>
 </html>
