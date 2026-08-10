@@ -450,4 +450,3 @@ function doAttack(e) {
 }
 attackBtn.addEventListener('touchstart', doAttack);
 attackBtn.addEventListener('mousedown', doAttack);
-
