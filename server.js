@@ -21,6 +21,7 @@ const io = new Server(server);
 
 const ARENA_WIDTH = 800;
 const rooms = new Map();
+let totalGamesPlayed = 0;
 
 function newPlayerState(slot) {
   return {
@@ -39,12 +40,22 @@ function createRoom(roomId) {
   return rooms.get(roomId);
 }
 
-function broadcastOnlineCount() {
-  io.emit('online_count', io.engine.clientsCount);
+function broadcastStats() {
+  io.emit('stats_update', {
+    online: io.engine.clientsCount,
+    totalGames: totalGamesPlayed,
+  });
 }
 
 io.on('connection', (socket) => {
-  broadcastOnlineCount();
+  broadcastStats();
+
+  socket.on('get_stats', () => {
+    socket.emit('stats_update', {
+      online: io.engine.clientsCount,
+      totalGames: totalGamesPlayed,
+    });
+  });
 
   socket.on('join_room', ({ roomId }) => {
     const room = createRoom(roomId);
@@ -88,6 +99,7 @@ io.on('connection', (socket) => {
     io.to(roomId).emit('attack_anim', { slot: attacker.slot });
 
     const opponentId = room.order.find((id) => id !== socket.id);
+    let hit = false;
     if (opponentId) {
       const opponent = room.players[opponentId];
       const dist = Math.abs(opponent.x - attacker.x);
@@ -95,18 +107,24 @@ io.on('connection', (socket) => {
                              (attacker.facing === -1 && opponent.x < attacker.x);
       if (dist < 90 && facingCorrect) {
         opponent.hp = Math.max(0, opponent.hp - 12);
+        hit = true;
       }
     }
 
     io.to(roomId).emit('state_update', room.players);
+    if (hit) {
+      io.to(roomId).emit('hit_landed', { targetSlot: room.players[opponentId].slot });
+    }
 
     if (opponentId && room.players[opponentId].hp <= 0) {
+      totalGamesPlayed += 1;
       io.to(roomId).emit('game_over', { winnerSlot: attacker.slot });
+      broadcastStats();
     }
 
     setTimeout(() => {
       attacker.attacking = false;
-    }, 500);
+    }, 300);
   });
 
   socket.on('disconnect', () => {
@@ -118,7 +136,7 @@ io.on('connection', (socket) => {
       io.to(roomId).emit('opponent_left');
       if (room.order.length === 0) rooms.delete(roomId);
     }
-    broadcastOnlineCount();
+    broadcastStats();
   });
 });
 
