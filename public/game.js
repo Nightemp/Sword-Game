@@ -1,4 +1,3 @@
-cat > /mnt/user-data/outputs/game.js << 'GAMEEOF'
 const tg = window.Telegram?.WebApp;
 if (tg) { tg.ready(); tg.expand(); }
 
@@ -25,6 +24,8 @@ const hpBarEls = {
 };
 const staminaWrap = document.getElementById('stamina-wrap');
 const staminaBar = document.getElementById('stamina-bar');
+// Счётчик побед ("ПОБЕДЫ 0" на экране). Если в вашей верстке другой id — поменяйте здесь.
+const winsCountEl = document.getElementById('wins-count');
 
 let mySlot = null;
 let players = {};
@@ -32,14 +33,15 @@ let attackFlash = null; // { slot, type }
 let bloodEffects = [];
 let sparkEffects = [];
 let screenShake = 0;
+let gameEnded = false;
 
 // анимация движения
 let lastX = {};
 let movingUntil = {};
 let walkPhase = { 0: 0, 1: 0 };
 
-function spawnBloodAt(x, y) {
-  for (let i = 0; i < 14; i++) {
+function spawnBloodAt(x, y, count = 14) {
+  for (let i = 0; i < count; i++) {
     bloodEffects.push({
       x, y,
       vx: (Math.random() - 0.5) * 5,
@@ -80,14 +82,16 @@ playBtn.addEventListener('click', () => {
     return;
   }
   menuOverlay.style.display = 'none';
-  socket.emit('join_room', { roomId });
+  socket.emit('join_room', { roomId, userId: tg?.initDataUnsafe?.user?.id || null });
 });
 
 socket.on('joined', (data) => {
   mySlot = data.slot;
   players = data.players;
+  gameEnded = false;
   statusEl.textContent = 'Ждём соперника...';
   staminaWrap.style.display = 'block';
+  if (winsCountEl && typeof data.wins === 'number') winsCountEl.textContent = data.wins;
   updateHpBars();
   updateStaminaBar();
 });
@@ -99,6 +103,7 @@ socket.on('opponent_joined', (data) => {
 
 socket.on('start_game', (data) => {
   players = data.players;
+  gameEnded = false;
   statusEl.textContent = '';
   updateHpBars();
 });
@@ -118,9 +123,10 @@ socket.on('state_update', (p) => {
 
 socket.on('attack_anim', ({ slot, type }) => {
   attackFlash = { slot, type };
+  const duration = type === 'kick' ? 260 : type === 'hand' ? 200 : 220;
   setTimeout(() => {
     if (attackFlash && attackFlash.slot === slot) attackFlash = null;
-  }, type === 'kick' ? 260 : 220);
+  }, duration);
 });
 
 socket.on('hit', ({ slot, part }) => {
@@ -160,12 +166,44 @@ socket.on('opponent_left', () => {
   statusEl.textContent = 'Соперник вышел из боя';
 });
 
-socket.on('game_over', ({ winnerSlot }) => {
-  statusEl.textContent = winnerSlot === mySlot ? '🏆 Победа!' : '💀 Поражение';
+// Тексты и эффекты для разных типов добивания
+const FINISHER_TEXT = {
+  decapitation: '🗡️ Голова отрублена!',
+  head_explode: '💥 Голова взорвалась!',
+  surrender: '🏳️ Соперник сдался!',
+};
+
+socket.on('game_over', ({ winnerSlot, loserSlot, finisher, winnerWins }) => {
+  gameEnded = true;
+
+  const iAmWinner = winnerSlot === mySlot;
+  const resultText = iAmWinner ? '🏆 Победа!' : '💀 Поражение';
+  const finisherText = FINISHER_TEXT[finisher] || '';
+  statusEl.textContent = `${resultText}  ${finisherText}`;
+
+  if (iAmWinner && winsCountEl && typeof winnerWins === 'number') {
+    winsCountEl.textContent = winnerWins;
+  }
+
+  // яркий эффект добивания на месте проигравшего
+  const loser = Object.values(players).find(pl => pl.slot === loserSlot);
+  if (loser) {
+    const scale = canvas.width / 800;
+    const lx = loser.x * scale;
+    const ly = canvas.height - 90;
+    screenShake = 18;
+    if (finisher === 'decapitation' || finisher === 'head_explode') {
+      spawnBloodAt(lx, ly - 130, 40);
+      spawnSparks(lx, ly - 130, loser.facing);
+    } else {
+      spawnSparks(lx, ly - 60, loser.facing);
+    }
+  }
+
   setTimeout(() => {
     playBtn.textContent = 'ИГРАТЬ СНОВА';
     menuOverlay.style.display = 'flex';
-  }, 1500);
+  }, 1800);
 });
 
 function updateHpBars() {
@@ -369,49 +407,60 @@ function drawFighter(p, scale) {
   ctx.fill();
   ctx.restore();
 
-  // передняя рука с мечом
-  const armSwingAttack = flashType === 'sword' ? -18 : -armSwing * 0.7;
+  // передняя рука — с мечом, либо с кулаком при ударе рукой
+  const isPunch = flashType === 'hand';
+  const armSwingAttack = flashType === 'sword' ? -18 : isPunch ? -30 : -armSwing * 0.7;
   ctx.save();
   ctx.translate(x + 15 * p.facing, groundY - 56);
   ctx.rotate((armSwingAttack * p.facing * Math.PI) / 180);
   ctx.fillStyle = bodyColor;
-  ctx.fillRect(0, 0, p.facing * 6, 26);
+  const armLen = isPunch ? 34 : 26;
+  ctx.fillRect(0, 0, p.facing * 6, armLen);
+  if (isPunch) {
+    // кулак на конце вытянутой руки
+    ctx.fillStyle = skin;
+    ctx.beginPath();
+    ctx.arc(p.facing * 3, armLen, 6, 0, Math.PI * 2);
+    ctx.fill();
+  }
   ctx.restore();
 
-  // меч
-  const swingAngle = flashType === 'sword' ? -40 : 0;
-  ctx.save();
-  ctx.translate(x + 20 * p.facing, groundY - 48);
-  ctx.rotate((swingAngle * p.facing * Math.PI) / 180);
+  // меч (не рисуем во время удара рукой, чтобы не мешал кулаку)
+  if (!isPunch) {
+    const swingAngle = flashType === 'sword' ? -40 : 0;
+    ctx.save();
+    ctx.translate(x + 20 * p.facing, groundY - 48);
+    ctx.rotate((swingAngle * p.facing * Math.PI) / 180);
 
-  const bladeLen = 44;
-  const bladeGrad = ctx.createLinearGradient(0, 0, p.facing * bladeLen, 0);
-  const swordActive = flashType === 'sword';
-  bladeGrad.addColorStop(0, swordActive ? '#fff4c2' : '#e4ecf0');
-  bladeGrad.addColorStop(1, swordActive ? '#ffe066' : '#9fb0b8');
-  ctx.strokeStyle = bladeGrad;
-  ctx.lineWidth = 4.5;
-  ctx.lineCap = 'round';
-  ctx.beginPath();
-  ctx.moveTo(0, 0);
-  ctx.lineTo(p.facing * bladeLen, 0);
-  ctx.stroke();
+    const bladeLen = 44;
+    const bladeGrad = ctx.createLinearGradient(0, 0, p.facing * bladeLen, 0);
+    const swordActive = flashType === 'sword';
+    bladeGrad.addColorStop(0, swordActive ? '#fff4c2' : '#e4ecf0');
+    bladeGrad.addColorStop(1, swordActive ? '#ffe066' : '#9fb0b8');
+    ctx.strokeStyle = bladeGrad;
+    ctx.lineWidth = 4.5;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(p.facing * bladeLen, 0);
+    ctx.stroke();
 
-  ctx.strokeStyle = '#c9a227';
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(p.facing * -2, -6);
-  ctx.lineTo(p.facing * -2, 6);
-  ctx.stroke();
+    ctx.strokeStyle = '#c9a227';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(p.facing * -2, -6);
+    ctx.lineTo(p.facing * -2, 6);
+    ctx.stroke();
 
-  ctx.strokeStyle = '#4a3222';
-  ctx.lineWidth = 3.5;
-  ctx.beginPath();
-  ctx.moveTo(0, 0);
-  ctx.lineTo(p.facing * -10, 0);
-  ctx.stroke();
+    ctx.strokeStyle = '#4a3222';
+    ctx.lineWidth = 3.5;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(p.facing * -10, 0);
+    ctx.stroke();
 
-  ctx.restore();
+    ctx.restore();
+  }
 
   // вспышка/эффект удара
   if (flashType === 'sword') {
@@ -423,6 +472,11 @@ function drawFighter(p, scale) {
     ctx.fillStyle = 'rgba(255,160,80,0.4)';
     ctx.beginPath();
     ctx.arc(x + 40 * p.facing, groundY - 10, 14, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (flashType === 'hand') {
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    ctx.beginPath();
+    ctx.arc(x + 45 * p.facing, groundY - 40, 12, 0, Math.PI * 2);
     ctx.fill();
   }
 }
@@ -528,21 +582,31 @@ zone.addEventListener('mousedown', handleStart);
 window.addEventListener('mousemove', handleMove);
 window.addEventListener('mouseup', handleEnd);
 
-const attackBtn = document.getElementById('attack-btn');
-const kickBtn = document.getElementById('kick-btn');
+const attackBtn = document.getElementById('attack-btn'); // МЕЧ
+const kickBtn = document.getElementById('kick-btn');     // НОГА
+const handBtn = document.getElementById('hand-btn');     // РУКА — проверьте, что такой id есть в вашем HTML
 
 function doSwordAttack(e) {
   e.preventDefault();
+  if (gameEnded) return;
   socket.emit('attack', { type: 'sword' });
 }
 function doKickAttack(e) {
   e.preventDefault();
+  if (gameEnded) return;
   socket.emit('attack', { type: 'kick' });
+}
+function doHandAttack(e) {
+  e.preventDefault();
+  if (gameEnded) return;
+  socket.emit('attack', { type: 'hand' });
 }
 
 attackBtn.addEventListener('touchstart', doSwordAttack);
 attackBtn.addEventListener('mousedown', doSwordAttack);
 kickBtn.addEventListener('touchstart', doKickAttack);
 kickBtn.addEventListener('mousedown', doKickAttack);
-GAMEEOF
-echo done
+if (handBtn) {
+  handBtn.addEventListener('touchstart', doHandAttack);
+  handBtn.addEventListener('mousedown', doHandAttack);
+}
