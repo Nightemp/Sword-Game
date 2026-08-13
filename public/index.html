@@ -8,49 +8,53 @@
 <style>
   html, body {
     margin: 0; padding: 0; height: 100%; overflow: hidden;
-    background: #1a1410; font-family: sans-serif; touch-action: none;
+    background: #060402; font-family: sans-serif; touch-action: none;
     -webkit-user-select: none; user-select: none;
   }
-  #arena { display: block; width: 100%; height: 70vh; background: linear-gradient(#3a2f28, #5b4636); }
-  #hud { position: absolute; top: 10px; left: 0; right: 0; display: flex; justify-content: space-between; padding: 0 16px; }
-  .hp-bar { width: 40%; height: 16px; background: #333; border-radius: 8px; overflow: hidden; border: 1px solid #000; }
-  .hp-fill { height: 100%; background: #d62828; transition: width 0.15s linear; }
+  #arena-wrap { position: relative; width: 100%; height: 70vh; overflow: hidden; }
+  #arena { display: block; width: 100%; height: 100%; }
+  #hud { position: absolute; top: 10px; left: 0; right: 0; display: flex; justify-content: space-between; padding: 0 16px; z-index: 5; }
+  .hp-bar { width: 40%; height: 16px; background: #1a1410; border-radius: 8px; overflow: hidden; border: 1px solid #000; box-shadow: 0 0 6px rgba(0,0,0,0.6) inset; }
+  .hp-fill { height: 100%; background: linear-gradient(#ff5f5f, #b8102a); transition: width 0.15s linear; }
   #controls {
     position: fixed; bottom: 0; left: 0; right: 0; height: 30vh;
     display: flex; align-items: center; justify-content: space-between;
-    padding: 0 20px; box-sizing: border-box;
+    padding: 0 20px; box-sizing: border-box; background: linear-gradient(#0c0906, #050302);
   }
   #joystick-zone {
     width: 130px; height: 130px; border-radius: 50%;
-    background: rgba(255,255,255,0.08); position: relative;
+    background: radial-gradient(circle, rgba(255,255,255,0.1), rgba(255,255,255,0.02));
+    position: relative; border: 1px solid rgba(255,255,255,0.15);
   }
   #joystick-knob {
     width: 60px; height: 60px; border-radius: 50%;
-    background: rgba(255,255,255,0.35); position: absolute;
-    top: 35px; left: 35px; pointer-events: none;
+    background: radial-gradient(circle at 35% 30%, #fff, #999);
+    position: absolute; top: 35px; left: 35px; pointer-events: none;
+    box-shadow: 0 3px 8px rgba(0,0,0,0.5);
   }
   #attack-btn {
-    width: 110px; height: 110px; border-radius: 50%;
-    background: #d62828; color: white; font-size: 16px; font-weight: bold;
-    border: 3px solid #7a1414; display: flex; align-items: center; justify-content: center;
+    width: 112px; height: 112px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #ff5a5a, #a91d1d 70%);
+    color: white; font-size: 16px; font-weight: bold; letter-spacing: 1px;
+    border: 3px solid #6e1010; display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.6);
   }
-  #attack-btn:active { background: #a91d1d; }
-  #status { position: absolute; top: 40%; left: 0; right: 0; text-align: center; color: white; font-size: 20px; }
+  #attack-btn:active { filter: brightness(0.85); }
+  #status { position: absolute; top: 40%; left: 0; right: 0; text-align: center; color: #ffe066; font-size: 22px; text-shadow: 0 2px 8px #000; z-index: 5; }
 
-  /* --- Меню --- */
   #menu-screen {
     position: fixed; inset: 0; z-index: 50;
-    background: radial-gradient(ellipse at top, #3a2f28, #100c08);
+    background: radial-gradient(ellipse at top, #3a2f28, #060402 80%);
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     color: #eee; text-align: center; gap: 18px;
   }
-  #menu-screen h1 { font-size: 26px; margin: 0; letter-spacing: 1px; color: #ffe066; text-shadow: 0 2px 6px #000; }
+  #menu-screen h1 { font-size: 26px; margin: 0; letter-spacing: 1px; color: #ffe066; text-shadow: 0 2px 10px #000; }
   #menu-stats { font-size: 14px; color: #ccc; display: flex; gap: 18px; }
   #menu-stats span { color: #ffe066; font-weight: bold; }
   #play-btn {
     padding: 16px 48px; font-size: 18px; font-weight: bold; color: white;
-    background: linear-gradient(#e63946, #a91d1d); border: 2px solid #7a1414;
-    border-radius: 12px;
+    background: linear-gradient(#ff5a5a, #a91d1d); border: 2px solid #6e1010;
+    border-radius: 12px; box-shadow: 0 6px 16px rgba(0,0,0,0.5);
   }
   #play-btn:active { filter: brightness(0.85); }
   #settings-btn {
@@ -59,9 +63,8 @@
     position: absolute; top: 20px; right: 20px; display: flex; align-items: center; justify-content: center;
   }
 
-  /* --- Настройки --- */
   #settings-modal {
-    position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,0.7);
+    position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,0.75);
     display: none; align-items: center; justify-content: center;
   }
   #settings-modal.open { display: flex; }
@@ -110,7 +113,9 @@
     <div class="hp-bar"><div id="hp0" class="hp-fill" style="width:100%"></div></div>
     <div class="hp-bar"><div id="hp1" class="hp-fill" style="width:100%"></div></div>
   </div>
-  <canvas id="arena"></canvas>
+  <div id="arena-wrap">
+    <canvas id="arena"></canvas>
+  </div>
   <div id="status"></div>
 
   <div id="controls">
