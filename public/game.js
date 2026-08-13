@@ -65,7 +65,12 @@ function ensureAudio() {
   if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   if (audioCtx.state === 'suspended') audioCtx.resume();
 }
-function beep({ freq = 440, duration = 0.1, type = 'sine', volume = 0.15, sweep = null }) {
+function beep(opts) {
+  const freq = opts.freq || 440;
+  const duration = opts.duration || 0.1;
+  const type = opts.type || 'sine';
+  const volume = opts.volume || 0.15;
+  const sweep = opts.sweep || null;
   if (!settings.sound || !audioCtx) return;
   const osc = audioCtx.createOscillator();
   const gain = audioCtx.createGain();
@@ -112,7 +117,7 @@ function startAmbient() {
   drone.start();
 }
 
-document.getElementById('play-btn').addEventListener('click', () => {
+document.getElementById('play-btn').addEventListener('click', function () {
   ensureAudio();
   startAmbient();
   document.getElementById('menu-screen').style.display = 'none';
@@ -120,47 +125,47 @@ document.getElementById('play-btn').addEventListener('click', () => {
 
 const socket = io();
 socket.emit('get_stats');
-socket.emit('join_room', { roomId });
+socket.emit('join_room', { roomId: roomId });
 
-socket.on('stats_update', ({ online, totalGames }) => {
-  document.getElementById('stat-online').textContent = online;
-  document.getElementById('stat-games').textContent = totalGames;
+socket.on('stats_update', function (data) {
+  document.getElementById('stat-online').textContent = data.online;
+  document.getElementById('stat-games').textContent = data.totalGames;
 });
-socket.on('joined', (data) => {
+socket.on('joined', function (data) {
   mySlot = data.slot;
   players = data.players;
   statusEl.textContent = 'Ждём соперника...';
 });
-socket.on('opponent_joined', (data) => { players = data.players; });
-socket.on('start_game', (data) => {
+socket.on('opponent_joined', function (data) { players = data.players; });
+socket.on('start_game', function (data) {
   players = data.players;
   statusEl.textContent = '';
 });
-socket.on('state_update', (p) => {
+socket.on('state_update', function (p) {
   players = p;
   updateHpBars();
 });
-socket.on('attack_anim', ({ slot }) => {
-  attackFlashSlot = slot;
-  attackStartTime[slot] = performance.now();
+socket.on('attack_anim', function (data) {
+  attackFlashSlot = data.slot;
+  attackStartTime[data.slot] = performance.now();
   playSwing();
-  setTimeout(() => (attackFlashSlot = null), 220);
+  setTimeout(function () { attackFlashSlot = null; }, 220);
 });
-socket.on('hit_landed', ({ targetSlot }) => {
+socket.on('hit_landed', function (data) {
   playClash();
   setTimeout(playHit, 60);
   shake = 10;
-  const p = Object.values(players).find((pl) => pl.slot === targetSlot);
+  const p = Object.values(players).find(function (pl) { return pl.slot === data.targetSlot; });
   if (p) spawnHitEffect(p);
 });
-socket.on('room_full', () => { statusEl.textContent = 'Комната уже занята'; });
-socket.on('opponent_left', () => { statusEl.textContent = 'Соперник вышел из боя'; });
-socket.on('game_over', ({ winnerSlot }) => {
-  statusEl.textContent = winnerSlot === mySlot ? '🏆 Победа!' : '💀 Поражение';
+socket.on('room_full', function () { statusEl.textContent = 'Комната уже занята'; });
+socket.on('opponent_left', function () { statusEl.textContent = 'Соперник вышел из боя'; });
+socket.on('game_over', function (data) {
+  statusEl.textContent = data.winnerSlot === mySlot ? '🏆 Победа!' : '💀 Поражение';
 });
 
 function updateHpBars() {
-  Object.values(players).forEach((p) => {
+  Object.values(players).forEach(function (p) {
     if (hpBars[p.slot]) hpBars[p.slot].style.width = p.hp + '%';
   });
 }
@@ -175,7 +180,7 @@ function spawnHitEffect(p) {
     particles.push({
       x: px, y: groundY - 55,
       vx: (Math.random() - 0.5) * 6, vy: -Math.random() * 5 - 1,
-      life: 1, color, size: settings.gore ? 3 + Math.random() * 3 : 2 + Math.random() * 2,
+      life: 1, color: color, size: settings.gore ? 3 + Math.random() * 3 : 2 + Math.random() * 2,
     });
   }
   for (let i = 0; i < 10; i++) {
@@ -189,20 +194,20 @@ function spawnHitEffect(p) {
   }
 }
 function updateParticles() {
-  particles.forEach((pt) => { pt.x += pt.vx; pt.y += pt.vy; pt.vy += 0.35; pt.life -= 0.03; });
-  particles = particles.filter((pt) => pt.life > 0);
-  sparks.forEach((s) => { s.x += s.vx; s.y += s.vy; s.life -= 0.06; });
-  sparks = sparks.filter((s) => s.life > 0);
+  particles.forEach(function (pt) { pt.x += pt.vx; pt.y += pt.vy; pt.vy += 0.35; pt.life -= 0.03; });
+  particles = particles.filter(function (pt) { return pt.life > 0; });
+  sparks.forEach(function (s) { s.x += s.vx; s.y += s.vy; s.life -= 0.06; });
+  sparks = sparks.filter(function (s) { return s.life > 0; });
 }
 function drawParticles() {
-  particles.forEach((pt) => {
+  particles.forEach(function (pt) {
     ctx.globalAlpha = Math.max(pt.life, 0);
     ctx.fillStyle = pt.color;
     ctx.beginPath();
     ctx.arc(pt.x, pt.y, pt.size, 0, Math.PI * 2);
     ctx.fill();
   });
-  sparks.forEach((s) => {
+  sparks.forEach(function (s) {
     ctx.globalAlpha = Math.max(s.life, 0);
     ctx.strokeStyle = '#fff6c8';
     ctx.lineWidth = 2;
@@ -281,7 +286,7 @@ function draw() {
   const groundY = cssH * 0.82;
   drawArenaBackground(groundY);
 
-  Object.values(players).forEach((p) => {
+  Object.values(players).forEach(function (p) {
     const x = p.x * scale;
     const y = groundY;
     const color = p.slot === 0 ? '#3f8a5c' : '#a13f3f';
@@ -391,7 +396,7 @@ function draw() {
     ctx.shadowBlur = 0;
 
     if (isAttacking) {
-      ctx.strokeStyle = `rgba(255,224,102,${0.55 * (1 - swingT)})`;
+      ctx.strokeStyle = 'rgba(255,224,102,' + (0.55 * (1 - swingT)) + ')';
       ctx.lineWidth = 4;
       ctx.beginPath();
       ctx.arc(0, -12, 58, -1.4, 0.6);
@@ -416,40 +421,4 @@ let currentDir = 0;
 
 function setKnob(dx) {
   const max = 35;
-  const clampedX = Math.max(-max, Math.min(max, dx));
-  knob.style.left = 35 + clampedX + 'px';
-  knob.style.top = '35px';
-}
-function startMoveLoop() {
-  if (moveInterval) return;
-  moveInterval = setInterval(() => {
-    if (currentDir !== 0) socket.emit('move', { dir: currentDir });
-  }, 40);
-}
-function stopMoveLoop() { clearInterval(moveInterval); moveInterval = null; }
-function handleStart() { ensureAudio(); dragging = true; startMoveLoop(); }
-function handleMove(e) {
-  if (!dragging) return;
-  const touch = e.touches ? e.touches[0] : e;
-  const rect = zone.getBoundingClientRect();
-  const dx = touch.clientX - (rect.left + rect.width / 2);
-  setKnob(dx);
-  currentDir = dx > 15 ? 1 : dx < -15 ? -1 : 0;
-}
-function handleEnd() { dragging = false; currentDir = 0; knob.style.left = '35px'; stopMoveLoop(); }
-
-zone.addEventListener('touchstart', handleStart);
-zone.addEventListener('touchmove', handleMove);
-zone.addEventListener('touchend', handleEnd);
-zone.addEventListener('mousedown', handleStart);
-window.addEventListener('mousemove', handleMove);
-window.addEventListener('mouseup', handleEnd);
-
-const attackBtn = document.getElementById('attack-btn');
-function doAttack(e) {
-  e.preventDefault();
-  ensureAudio();
-  socket.emit('attack');
-}
-attackBtn.addEventListener('touchstart', doAttack);
-attackBtn.addEventListener('mousedown', doAttack);
+  const clampedX = Math.max(-max, Math.min(
