@@ -1,10 +1,9 @@
-cat > /mnt/user-data/outputs/index.html << 'HTMLEOF'
 <!DOCTYPE html>
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Sword Duel</title>
+<title>Octagon Duel</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
   html, body {
@@ -12,7 +11,7 @@ cat > /mnt/user-data/outputs/index.html << 'HTMLEOF'
     padding: 0;
     width: 100%;
     height: 100%;
-    background: #14100e;
+    background: #0c0d12;
     overflow: hidden;
     font-family: -apple-system, BlinkMacSystemFont, sans-serif;
     color: #fff;
@@ -24,7 +23,7 @@ cat > /mnt/user-data/outputs/index.html << 'HTMLEOF'
     display: block;
     width: 100%;
     height: 100%;
-    background: linear-gradient(#3a2f28, #6b5644);
+    background: #14100e;
   }
 
   #status {
@@ -36,6 +35,7 @@ cat > /mnt/user-data/outputs/index.html << 'HTMLEOF'
     font-weight: bold;
     text-shadow: 0 2px 4px rgba(0,0,0,0.8);
     pointer-events: none;
+    z-index: 3;
   }
 
   /* ---- HUD: полоски частей тела ---- */
@@ -46,6 +46,7 @@ cat > /mnt/user-data/outputs/index.html << 'HTMLEOF'
     display: flex;
     flex-direction: column;
     gap: 3px;
+    z-index: 3;
   }
   #hp-group-0 { left: 10px; }
   #hp-group-1 { right: 10px; align-items: flex-end; }
@@ -99,16 +100,13 @@ cat > /mnt/user-data/outputs/index.html << 'HTMLEOF'
     border-radius: 4px;
     overflow: hidden;
     display: none;
+    z-index: 3;
   }
   #stamina-bar {
     height: 100%;
     width: 100%;
     background: linear-gradient(#ffe066, #d9a521);
     transition: width 0.15s ease-out;
-  }
-
-  .hp-container {
-    /* оставлено выше */
   }
 
   #joystick-zone {
@@ -120,6 +118,7 @@ cat > /mnt/user-data/outputs/index.html << 'HTMLEOF'
     border-radius: 50%;
     background: rgba(255,255,255,0.15);
     border: 2px solid rgba(255,255,255,0.3);
+    z-index: 3;
   }
   #joystick-knob {
     position: absolute;
@@ -131,32 +130,44 @@ cat > /mnt/user-data/outputs/index.html << 'HTMLEOF'
     background: rgba(255,255,255,0.8);
   }
 
-  #attack-btn {
+  /* ---- Кнопки ударов ---- */
+  #attack-controls {
     position: absolute;
-    right: 24px;
-    bottom: 50px;
-    width: 110px;
-    height: 110px;
+    right: 16px;
+    bottom: 30px;
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    z-index: 3;
+  }
+
+  .atk-btn {
     border-radius: 50%;
-    background: rgba(255,80,80,0.35);
-    border: 2px solid rgba(255,120,120,0.6);
     color: #fff;
-    font-size: 15px;
+    font-size: 11px;
     font-weight: bold;
+    letter-spacing: 0.5px;
   }
 
   #kick-btn {
-    position: absolute;
-    right: 148px;
-    bottom: 50px;
-    width: 84px;
-    height: 84px;
-    border-radius: 50%;
-    background: rgba(255,170,60,0.3);
+    width: 76px;
+    height: 76px;
+    background: rgba(255,170,60,0.32);
     border: 2px solid rgba(255,190,100,0.6);
-    color: #fff;
-    font-size: 13px;
-    font-weight: bold;
+  }
+
+  #hand-btn {
+    width: 88px;
+    height: 88px;
+    background: rgba(120,170,255,0.32);
+    border: 2px solid rgba(150,190,255,0.6);
+  }
+
+  #attack-btn {
+    width: 104px;
+    height: 104px;
+    background: rgba(255,80,80,0.32);
+    border: 2px solid rgba(255,120,120,0.6);
   }
 
   #menu-overlay {
@@ -165,7 +176,7 @@ cat > /mnt/user-data/outputs/index.html << 'HTMLEOF'
     left: 0;
     width: 100%;
     height: 100%;
-    background: linear-gradient(#1c1512, #3a2f28);
+    background: linear-gradient(#111318, #2a1414);
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -174,7 +185,7 @@ cat > /mnt/user-data/outputs/index.html << 'HTMLEOF'
   }
 
   #menu-title {
-    font-size: 34px;
+    font-size: 32px;
     font-weight: bold;
     letter-spacing: 1px;
     margin-bottom: 6px;
@@ -258,13 +269,17 @@ cat > /mnt/user-data/outputs/index.html << 'HTMLEOF'
 <div id="joystick-zone">
   <div id="joystick-knob"></div>
 </div>
-<button id="kick-btn">ПИНОК</button>
-<button id="attack-btn">МЕЧ</button>
+
+<div id="attack-controls">
+  <button id="kick-btn" class="atk-btn">НОГИ</button>
+  <button id="hand-btn" class="atk-btn">ТОРС</button>
+  <button id="attack-btn" class="atk-btn">ГОЛОВА</button>
+</div>
 
 <div id="menu-overlay">
-  <div id="menu-title">⚔️ SWORD DUEL</div>
-  <div id="menu-subtitle">Джойстик слева — движение.<br>«МЕЧ» бьёт по голове/торсу издалека, «ПИНОК» — по ногам вблизи, сильнее.<br>Следи за выносливостью — на удар без сил не хватит.</div>
-  <button id="play-btn">ИГРАТЬ</button>
+  <div id="menu-title">🥊 OCTAGON DUEL</div>
+  <div id="menu-subtitle">Джойстик слева — движение.<br>«ГОЛОВА» — джеб на дальней дистанции, «ТОРС» — хук, ломает корпус и может стать критическим ударом, «НОГИ» — пинок вблизи, самый сильный.<br>Каждый удачный удар пополняет твою выносливость.</div>
+  <button id="play-btn">В ОКТАГОН</button>
   <div id="online-counter">Сейчас играют: <span id="online-count">—</span></div>
 </div>
 
@@ -272,4 +287,3 @@ cat > /mnt/user-data/outputs/index.html << 'HTMLEOF'
 <script src="game.js"></script>
 </body>
 </html>
-HTMLEOF
