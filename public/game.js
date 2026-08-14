@@ -32,8 +32,12 @@ let players = {};
 let attackFlash = null; // { slot, type }
 let bloodEffects = [];
 let sparkEffects = [];
+let hitMarkers = [];    // маркеры места попадания прямо на бойце
+let critFlash = 0;      // кадры вспышки "критический удар"
 let screenShake = 0;
 let gameEnded = false;
+
+const PART_LABEL = { head: 'ГОЛОВА', torso: 'ТОРС', legs: 'НОГИ' };
 
 // анимация движения
 let lastX = {};
@@ -64,6 +68,15 @@ function spawnSparks(x, y, facing) {
       size: Math.random() * 2 + 1
     });
   }
+}
+
+// Координаты частей тела бойца на арене (совпадают с отрисовкой в drawFighter)
+function bodyPartPoint(player, part, scale) {
+  const x = player.x * scale;
+  const groundY = canvas.height - 90;
+  if (part === 'head') return { x, y: groundY - 76 };
+  if (part === 'torso') return { x, y: groundY - 45 };
+  return { x, y: groundY - 12 }; // legs
 }
 
 const socket = io();
@@ -129,24 +142,23 @@ socket.on('attack_anim', ({ slot, type }) => {
   }, duration);
 });
 
-socket.on('hit', ({ slot, part }) => {
-  screenShake = 8;
+socket.on('hit', ({ slot, part, critical }) => {
+  screenShake = critical ? 15 : 8;
 
-  // кровь у соответствующей полосы в HUD
-  const barEl = hpBarEls[slot][part];
-  if (barEl) {
-    const rect = barEl.getBoundingClientRect();
-    const canvasRect = canvas.getBoundingClientRect();
-    const bx = slot === 0 ? rect.right - canvasRect.left : rect.left - canvasRect.left;
-    const by = rect.top - canvasRect.top + rect.height / 2;
-    spawnBloodAt(bx, by);
-  }
-
-  // искры прямо на персонаже для эффектности
   const hitPlayer = Object.values(players).find(pl => pl.slot === slot);
   if (hitPlayer) {
     const scale = canvas.width / 800;
-    spawnSparks(hitPlayer.x * scale, canvas.height - 140, -hitPlayer.facing);
+    const pt = bodyPartPoint(hitPlayer, part, scale);
+
+    // кровь прямо на месте попадания (в том числе на лице, если part === 'head')
+    const bloodCount = critical ? 26 : (part === 'head' ? 18 : 14);
+    spawnBloodAt(pt.x, pt.y, bloodCount);
+    spawnSparks(pt.x, pt.y, -hitPlayer.facing);
+
+    // маркер на ринге, показывающий куда пришёлся удар
+    hitMarkers.push({ x: pt.x, y: pt.y, part, critical: !!critical, life: 42, maxLife: 42 });
+
+    if (critical) critFlash = 30;
   }
 });
 
@@ -166,11 +178,12 @@ socket.on('opponent_left', () => {
   statusEl.textContent = 'Соперник вышел из боя';
 });
 
-// Тексты и эффекты для разных типов добивания
+// Тексты для разных типов добивания
 const FINISHER_TEXT = {
-  decapitation: '🗡️ Голова отрублена!',
-  head_explode: '💥 Голова взорвалась!',
-  surrender: '🏳️ Соперник сдался!',
+  ko_head: '🥊 Нокаут в голову!',
+  ko_legs: '🦵 Нокаут по ногам!',
+  surrender: '😵 Технический нокаут!',
+  body_break: '💥 Критический удар в корпус!',
 };
 
 socket.on('game_over', ({ winnerSlot, loserSlot, finisher, winnerWins }) => {
@@ -189,14 +202,23 @@ socket.on('game_over', ({ winnerSlot, loserSlot, finisher, winnerWins }) => {
   const loser = Object.values(players).find(pl => pl.slot === loserSlot);
   if (loser) {
     const scale = canvas.width / 800;
-    const lx = loser.x * scale;
-    const ly = canvas.height - 90;
     screenShake = 18;
-    if (finisher === 'decapitation' || finisher === 'head_explode') {
-      spawnBloodAt(lx, ly - 130, 40);
-      spawnSparks(lx, ly - 130, loser.facing);
+    if (finisher === 'ko_head') {
+      const pt = bodyPartPoint(loser, 'head', scale);
+      spawnBloodAt(pt.x, pt.y, 40);
+      spawnSparks(pt.x, pt.y, loser.facing);
+    } else if (finisher === 'body_break') {
+      const pt = bodyPartPoint(loser, 'torso', scale);
+      spawnBloodAt(pt.x, pt.y, 45);
+      spawnSparks(pt.x, pt.y, loser.facing);
+      critFlash = 40;
+    } else if (finisher === 'ko_legs') {
+      const pt = bodyPartPoint(loser, 'legs', scale);
+      spawnBloodAt(pt.x, pt.y, 30);
+      spawnSparks(pt.x, pt.y, loser.facing);
     } else {
-      spawnSparks(lx, ly - 60, loser.facing);
+      const pt = bodyPartPoint(loser, 'torso', scale);
+      spawnSparks(pt.x, pt.y, loser.facing);
     }
   }
 
@@ -222,74 +244,83 @@ function updateStaminaBar() {
   if (me) staminaBar.style.width = Math.max(0, me.stamina) + '%';
 }
 
-// ---------- ФОН АРЕНЫ ----------
+// ---------- ФОН АРЕНЫ: ОКТАГОН ----------
 function drawBackground() {
   const w = canvas.width, h = canvas.height;
 
-  const sky = ctx.createLinearGradient(0, 0, 0, h * 0.62);
-  sky.addColorStop(0, '#2b1f3a');
-  sky.addColorStop(0.5, '#5a3a52');
-  sky.addColorStop(1, '#c97b5a');
-  ctx.fillStyle = sky;
-  ctx.fillRect(0, 0, w, h * 0.62);
+  // тёмный потолок арены
+  const top = ctx.createLinearGradient(0, 0, 0, h * 0.4);
+  top.addColorStop(0, '#0a0b10');
+  top.addColorStop(1, '#1a1c24');
+  ctx.fillStyle = top;
+  ctx.fillRect(0, 0, w, h * 0.4);
 
-  const sunX = w * 0.78, sunY = h * 0.22, sunR = Math.min(w, h) * 0.09;
-  const sunGlow = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, sunR * 2.4);
-  sunGlow.addColorStop(0, 'rgba(255,210,140,0.55)');
-  sunGlow.addColorStop(1, 'rgba(255,210,140,0)');
-  ctx.fillStyle = sunGlow;
-  ctx.beginPath();
-  ctx.arc(sunX, sunY, sunR * 2.4, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = '#ffe3ad';
-  ctx.beginPath();
-  ctx.arc(sunX, sunY, sunR, 0, Math.PI * 2);
-  ctx.fill();
+  // прожекторы над рингом
+  [0.22, 0.5, 0.78].forEach(fx => {
+    const lx = w * fx, ly = h * 0.02;
+    const glow = ctx.createRadialGradient(lx, ly, 0, lx, ly, h * 0.45);
+    glow.addColorStop(0, 'rgba(255,255,255,0.16)');
+    glow.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, w, h * 0.6);
+  });
 
-  ctx.fillStyle = '#241a2e';
-  ctx.beginPath();
-  ctx.moveTo(0, h * 0.5);
-  for (let x = 0; x <= w; x += w / 8) {
-    const peak = h * 0.5 - Math.sin(x * 0.008 + 1) * h * 0.06 - h * 0.03;
-    ctx.lineTo(x, peak);
-  }
-  ctx.lineTo(w, h * 0.62);
-  ctx.lineTo(0, h * 0.62);
-  ctx.closePath();
-  ctx.fill();
-
-  ctx.fillStyle = '#3a2a2a';
-  ctx.beginPath();
-  ctx.moveTo(0, h * 0.6);
-  for (let x = 0; x <= w; x += w / 6) {
-    const peak = h * 0.6 - Math.sin(x * 0.01 + 3) * h * 0.035;
-    ctx.lineTo(x, peak);
-  }
-  ctx.lineTo(w, h * 0.66);
-  ctx.lineTo(0, h * 0.66);
-  ctx.closePath();
-  ctx.fill();
-
-  const ground = ctx.createLinearGradient(0, h * 0.6, 0, h);
-  ground.addColorStop(0, '#6b5644');
-  ground.addColorStop(0.15, '#4a3b2f');
-  ground.addColorStop(1, '#241c16');
-  ctx.fillStyle = ground;
-  ctx.fillRect(0, h * 0.6, w, h * 0.4);
-
-  ctx.strokeStyle = 'rgba(0,0,0,0.15)';
-  ctx.lineWidth = 2;
-  for (let i = 0; i < 6; i++) {
-    const y = h * 0.65 + i * (h * 0.35 / 6);
+  // сетка клетки (октагон)
+  const fenceTop = h * 0.1, fenceBottom = h * 0.6;
+  ctx.strokeStyle = 'rgba(190,195,205,0.28)';
+  ctx.lineWidth = 1.5;
+  for (let x = 0; x <= w; x += 24) {
     ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(w, y + Math.sin(i) * 6);
+    ctx.moveTo(x, fenceTop);
+    ctx.lineTo(x, fenceBottom);
     ctx.stroke();
   }
+  for (let y = fenceTop; y <= fenceBottom; y += 24) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(w, y);
+    ctx.stroke();
+  }
+  // затемнение клетки, чтобы бойцы читались на фоне
+  const fenceFade = ctx.createLinearGradient(0, fenceTop, 0, fenceBottom);
+  fenceFade.addColorStop(0, 'rgba(8,8,12,0.6)');
+  fenceFade.addColorStop(1, 'rgba(8,8,12,0.15)');
+  ctx.fillStyle = fenceFade;
+  ctx.fillRect(0, fenceTop, w, fenceBottom - fenceTop);
+
+  // верхний трос клетки
+  ctx.strokeStyle = 'rgba(220,220,230,0.5)';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(0, fenceTop);
+  ctx.lineTo(w, fenceTop);
+  ctx.stroke();
+
+  // мат октагона
+  const mat = ctx.createLinearGradient(0, h * 0.58, 0, h);
+  mat.addColorStop(0, '#7a1f1f');
+  mat.addColorStop(0.5, '#551515');
+  mat.addColorStop(1, '#280a0a');
+  ctx.fillStyle = mat;
+  ctx.fillRect(0, h * 0.58, w, h * 0.42);
+
+  // белая кромка периметра мата
+  ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.moveTo(0, h * 0.6);
+  ctx.lineTo(w, h * 0.6);
+  ctx.stroke();
+
+  // надпись по центру мата
+  ctx.fillStyle = 'rgba(255,255,255,0.1)';
+  ctx.font = `bold ${Math.round(h * 0.05)}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.fillText('OCTAGON', w / 2, h * 0.86);
 
   const vignette = ctx.createRadialGradient(w / 2, h / 2, h * 0.3, w / 2, h / 2, h);
   vignette.addColorStop(0, 'rgba(0,0,0,0)');
-  vignette.addColorStop(1, 'rgba(0,0,0,0.45)');
+  vignette.addColorStop(1, 'rgba(0,0,0,0.5)');
   ctx.fillStyle = vignette;
   ctx.fillRect(0, 0, w, h);
 }
@@ -299,9 +330,10 @@ function drawFighter(p, scale) {
   const y = canvas.height - 90;
   const isFlash = attackFlash && attackFlash.slot === p.slot;
   const flashType = isFlash ? attackFlash.type : null;
-  const bodyColor = p.slot === 0 ? '#3f7a4f' : '#8a3d3d';
-  const bodyShade = p.slot === 0 ? '#2b5638' : '#602a2a';
-  const skin = '#e8b88a';
+  const skin = p.slot === 0 ? '#c98a5a' : '#d9a878';
+  const shortsColor = p.slot === 0 ? '#2f6b3f' : '#7a2f2f';
+  const shortsShade = p.slot === 0 ? '#1f4a2b' : '#571f1f';
+  const gloveColor = p.slot === 0 ? '#1c1c1c' : '#c21e1e';
   const legsHurt = p.hp.legs <= 40;
 
   const isMoving = movingUntil[p.slot] && Date.now() < movingUntil[p.slot];
@@ -324,23 +356,14 @@ function drawFighter(p, scale) {
 
   const groundY = y - bob;
 
-  // плащ
-  ctx.fillStyle = bodyShade;
-  ctx.beginPath();
-  ctx.moveTo(x - 12 * p.facing, groundY - 62);
-  ctx.quadraticCurveTo(x - 26 * p.facing, groundY - 35, x - 16 * p.facing, groundY - 2);
-  ctx.lineTo(x - 4 * p.facing, groundY - 2);
-  ctx.closePath();
-  ctx.fill();
-
-  // задняя нога (качается в противофазе)
+  // задняя нога
   ctx.save();
   ctx.translate(x - 5, groundY - 4);
   ctx.rotate((-legSwing * Math.PI) / 180 * 0.6);
-  ctx.fillStyle = '#241c18';
+  ctx.fillStyle = skin;
   ctx.fillRect(-4.5, -22, 9, 22);
-  ctx.fillStyle = '#100c0a';
-  ctx.fillRect(-5.5, -2, 11, 4);
+  ctx.fillStyle = '#111';
+  ctx.fillRect(-5.5, -2, 11, 5);
   ctx.restore();
 
   // передняя нога (с ударом при пинке)
@@ -353,51 +376,61 @@ function drawFighter(p, scale) {
   ctx.save();
   ctx.translate(x + 7 * p.facing, groundY - 4);
   ctx.rotate((kickAngle * p.facing * Math.PI) / 180);
-  ctx.fillStyle = legsHurt ? '#3a2018' : '#241c18';
+  ctx.fillStyle = legsHurt ? '#8a5a3a' : skin;
   ctx.fillRect(-4.5, -22, 9, 22);
-  ctx.fillStyle = '#100c0a';
-  ctx.fillRect(-5.5, -2, 11, 4);
+  ctx.fillStyle = '#111';
+  ctx.fillRect(-5.5, -2, 11, 5);
   ctx.restore();
 
-  // тело (лёгкий наклон при ходьбе, отклон назад при замахе мечом)
-  const swordWindup = flashType === 'sword' ? -8 : 0;
+  // торс + шорты (лёгкий наклон при ходьбе / замахе)
+  const punchWindup = (flashType === 'sword' || flashType === 'hand') ? -6 : 0;
   ctx.save();
   ctx.translate(x, groundY - 42);
-  ctx.rotate(((torsoTilt + swordWindup) * p.facing * Math.PI) / 180);
-  const bodyGrad = ctx.createLinearGradient(-16, -20, 16, 20);
-  bodyGrad.addColorStop(0, bodyColor);
-  bodyGrad.addColorStop(1, bodyShade);
+  ctx.rotate(((torsoTilt + punchWindup) * p.facing * Math.PI) / 180);
+
+  const bodyGrad = ctx.createLinearGradient(-16, -22, 16, 20);
+  bodyGrad.addColorStop(0, skin);
+  bodyGrad.addColorStop(1, shortsShade);
   ctx.fillStyle = bodyGrad;
-  ctx.fillRect(-16, -20, 32, 42);
-  ctx.fillStyle = '#1a1410';
-  ctx.fillRect(-16, 16, 32, 5);
-  ctx.strokeStyle = 'rgba(255,255,255,0.25)';
-  ctx.lineWidth = 1.5;
+  ctx.fillRect(-15, -22, 30, 30);
+
+  ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+  ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.moveTo(0, -18);
-  ctx.lineTo(0, 18);
+  ctx.moveTo(0, -14); ctx.lineTo(0, 6);
+  ctx.moveTo(-8, -8); ctx.lineTo(8, -8);
+  ctx.moveTo(-8, 0); ctx.lineTo(8, 0);
   ctx.stroke();
+
+  ctx.fillStyle = shortsColor;
+  ctx.fillRect(-16, 6, 32, 14);
+  ctx.fillStyle = 'rgba(255,255,255,0.5)';
+  ctx.fillRect(-16, 6, 32, 2);
   ctx.restore();
 
   // задняя рука
   ctx.save();
   ctx.translate(x - 18 * p.facing, groundY - 58);
   ctx.rotate((armSwing * p.facing * Math.PI) / 180 * 0.7);
-  ctx.fillStyle = bodyShade;
-  ctx.fillRect(0, 0, 6, 26);
+  ctx.fillStyle = skin;
+  ctx.fillRect(0, 0, 6, 22);
+  ctx.fillStyle = gloveColor;
+  ctx.beginPath();
+  ctx.arc(3, 24, 6, 0, Math.PI * 2);
+  ctx.fill();
   ctx.restore();
 
   // голова
   ctx.save();
   ctx.translate(x, groundY - 76);
-  ctx.rotate(((torsoTilt + swordWindup) * p.facing * Math.PI) / 180 * 0.5);
+  ctx.rotate(((torsoTilt + punchWindup) * p.facing * Math.PI) / 180 * 0.5);
   ctx.fillStyle = skin;
   ctx.beginPath();
   ctx.arc(0, 0, 14, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = bodyShade;
+  ctx.fillStyle = shortsShade;
   ctx.beginPath();
-  ctx.arc(0, -4, 14.5, Math.PI, 0);
+  ctx.arc(0, -3, 14.5, Math.PI, 0);
   ctx.fill();
   ctx.fillStyle = '#1a1410';
   const eyeShift = p.facing * 4;
@@ -407,66 +440,31 @@ function drawFighter(p, scale) {
   ctx.fill();
   ctx.restore();
 
-  // передняя рука — с мечом, либо с кулаком при ударе рукой
-  const isPunch = flashType === 'hand';
-  const armSwingAttack = flashType === 'sword' ? -18 : isPunch ? -30 : -armSwing * 0.7;
+  // ударная рука: "sword" = джеб в голову, "hand" = хук в торс
+  const isPunchHead = flashType === 'sword';
+  const isPunchBody = flashType === 'hand';
+  let armAngle = -armSwing * 0.7;
+  let armLen = 22;
+  let armY = groundY - 56;
+  if (isPunchHead) { armAngle = -20; armLen = 34; armY = groundY - 62; }
+  if (isPunchBody) { armAngle = -35; armLen = 30; armY = groundY - 46; }
+
   ctx.save();
-  ctx.translate(x + 15 * p.facing, groundY - 56);
-  ctx.rotate((armSwingAttack * p.facing * Math.PI) / 180);
-  ctx.fillStyle = bodyColor;
-  const armLen = isPunch ? 34 : 26;
+  ctx.translate(x + 15 * p.facing, armY);
+  ctx.rotate((armAngle * p.facing * Math.PI) / 180);
+  ctx.fillStyle = skin;
   ctx.fillRect(0, 0, p.facing * 6, armLen);
-  if (isPunch) {
-    // кулак на конце вытянутой руки
-    ctx.fillStyle = skin;
-    ctx.beginPath();
-    ctx.arc(p.facing * 3, armLen, 6, 0, Math.PI * 2);
-    ctx.fill();
-  }
+  ctx.fillStyle = gloveColor;
+  ctx.beginPath();
+  ctx.arc(p.facing * 3, armLen, 7, 0, Math.PI * 2);
+  ctx.fill();
   ctx.restore();
 
-  // меч (не рисуем во время удара рукой, чтобы не мешал кулаку)
-  if (!isPunch) {
-    const swingAngle = flashType === 'sword' ? -40 : 0;
-    ctx.save();
-    ctx.translate(x + 20 * p.facing, groundY - 48);
-    ctx.rotate((swingAngle * p.facing * Math.PI) / 180);
-
-    const bladeLen = 44;
-    const bladeGrad = ctx.createLinearGradient(0, 0, p.facing * bladeLen, 0);
-    const swordActive = flashType === 'sword';
-    bladeGrad.addColorStop(0, swordActive ? '#fff4c2' : '#e4ecf0');
-    bladeGrad.addColorStop(1, swordActive ? '#ffe066' : '#9fb0b8');
-    ctx.strokeStyle = bladeGrad;
-    ctx.lineWidth = 4.5;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.lineTo(p.facing * bladeLen, 0);
-    ctx.stroke();
-
-    ctx.strokeStyle = '#c9a227';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(p.facing * -2, -6);
-    ctx.lineTo(p.facing * -2, 6);
-    ctx.stroke();
-
-    ctx.strokeStyle = '#4a3222';
-    ctx.lineWidth = 3.5;
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.lineTo(p.facing * -10, 0);
-    ctx.stroke();
-
-    ctx.restore();
-  }
-
-  // вспышка/эффект удара
+  // вспышка удара
   if (flashType === 'sword') {
-    ctx.fillStyle = 'rgba(255,224,102,0.45)';
+    ctx.fillStyle = 'rgba(255,255,255,0.4)';
     ctx.beginPath();
-    ctx.arc(x + 55 * p.facing, groundY - 50, 16, 0, Math.PI * 2);
+    ctx.arc(x + 50 * p.facing, groundY - 62, 14, 0, Math.PI * 2);
     ctx.fill();
   } else if (flashType === 'kick') {
     ctx.fillStyle = 'rgba(255,160,80,0.4)';
@@ -527,6 +525,35 @@ function draw() {
   });
   bloodEffects = bloodEffects.filter(b => b.life > 0);
 
+  // маркеры попадания на теле бойца (показывают куда пришёлся удар)
+  hitMarkers.forEach(m => {
+    const t = 1 - m.life / m.maxLife;
+    const alpha = Math.max(m.life / m.maxLife, 0);
+    ctx.strokeStyle = m.critical ? `rgba(255,60,60,${alpha})` : `rgba(255,255,255,${alpha})`;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.arc(m.x, m.y, 10 + t * 22, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = m.critical ? `rgba(255,90,90,${alpha})` : `rgba(255,255,255,${alpha})`;
+    ctx.font = 'bold 11px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(PART_LABEL[m.part] || '', m.x, m.y - 16 - t * 20);
+    m.life--;
+  });
+  hitMarkers = hitMarkers.filter(m => m.life > 0);
+
+  // вспышка критического удара
+  if (critFlash > 0) {
+    const alpha = Math.min(critFlash / 30, 1);
+    ctx.fillStyle = `rgba(255,0,0,${alpha * 0.22})`;
+    ctx.fillRect(-20, -20, w + 40, h + 40);
+    ctx.fillStyle = `rgba(255,225,70,${alpha})`;
+    ctx.font = `bold ${Math.round(h * 0.05)}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText('КРИТИЧЕСКИЙ УДАР!', w / 2, h * 0.3);
+    critFlash--;
+  }
+
   ctx.restore();
   requestAnimationFrame(draw);
 }
@@ -582,9 +609,9 @@ zone.addEventListener('mousedown', handleStart);
 window.addEventListener('mousemove', handleMove);
 window.addEventListener('mouseup', handleEnd);
 
-const attackBtn = document.getElementById('attack-btn'); // МЕЧ
-const kickBtn = document.getElementById('kick-btn');     // НОГА
-const handBtn = document.getElementById('hand-btn');     // РУКА — проверьте, что такой id есть в вашем HTML
+const attackBtn = document.getElementById('attack-btn'); // ГОЛОВА (джеб)
+const kickBtn = document.getElementById('kick-btn');     // НОГИ (пинок)
+const handBtn = document.getElementById('hand-btn');     // ТОРС (хук, может стать критическим)
 
 function doSwordAttack(e) {
   e.preventDefault();
