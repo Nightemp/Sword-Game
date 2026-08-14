@@ -27,17 +27,17 @@ const rooms = new Map();
 const winCounters = new Map();
 
 // ---------- НАСТРОЙКИ БОЯ ----------
-// Меч -> всегда бьёт в голову
+// Голова (кнопка "ГОЛОВА") -> джеб на дальней дистанции
 const SWORD_RANGE = 120;
 const SWORD_COST = 20;
 const SWORD_HEAD_DMG = 20;
 
-// Рука -> всегда бьёт в тело
+// Торс (кнопка "ТОРС") -> хук, может стать критическим
 const HAND_RANGE = 90;
 const HAND_COST = 12;
 const HAND_TORSO_DMG = 15;
 
-// Нога -> всегда бьёт в ноги
+// Ноги (кнопка "НОГИ") -> пинок вблизи, самый сильный
 const KICK_RANGE = 70;
 const KICK_COST = 15;
 const KICK_LEGS_DMG = 22;
@@ -46,11 +46,16 @@ const STAMINA_REGEN = 3;
 const STAMINA_TICK_MS = 300;
 const LEGS_SLOW_THRESHOLD = 40;
 
+// Выносливость атакующего восстанавливается от каждого удачного попадания
+const STAMINA_GAIN_ON_HIT = 10;
+// Удар по торсу, который "ломает" его (добивает часть тела до 0) — критический
+const CRITICAL_PART = 'torso';
+
 // Соответствие типа удара -> (часть тела, урон, дистанция, стоимость, тип добивания)
 const ATTACKS = {
-  sword: { part: 'head', dmg: SWORD_HEAD_DMG, range: SWORD_RANGE, cost: SWORD_COST, finisher: 'decapitation' },
+  sword: { part: 'head', dmg: SWORD_HEAD_DMG, range: SWORD_RANGE, cost: SWORD_COST, finisher: 'ko_head' },
   hand: { part: 'torso', dmg: HAND_TORSO_DMG, range: HAND_RANGE, cost: HAND_COST, finisher: 'surrender' },
-  kick: { part: 'legs', dmg: KICK_LEGS_DMG, range: KICK_RANGE, cost: KICK_COST, finisher: 'head_explode' },
+  kick: { part: 'legs', dmg: KICK_LEGS_DMG, range: KICK_RANGE, cost: KICK_COST, finisher: 'ko_legs' },
 };
 
 function newPlayerState(slot, userId) {
@@ -161,7 +166,6 @@ io.on('connection', (socket) => {
     io.to(roomId).emit('attack_anim', { slot: attacker.slot, type });
 
     const opponentId = room.order.find((id) => id !== socket.id);
-    let killed = false;
 
     if (opponentId) {
       const opponent = room.players[opponentId];
@@ -172,20 +176,34 @@ io.on('connection', (socket) => {
       if (dist < config.range && facingCorrect && !isDead(opponent)) {
         const part = config.part;
         opponent.hp[part] = Math.max(0, opponent.hp[part] - config.dmg);
-        io.to(roomId).emit('hit', { slot: opponent.slot, part, type });
+
+        // выносливость атакующего растёт от удачного удара
+        attacker.stamina = Math.min(100, attacker.stamina + STAMINA_GAIN_ON_HIT);
+
+        // удар по торсу, добивший его до нуля — считается критическим
+        const isCritical = part === CRITICAL_PART && opponent.hp[part] <= 0;
+
+        io.to(roomId).emit('hit', {
+          slot: opponent.slot,
+          part,
+          type,
+          critical: isCritical,
+          attackerSlot: attacker.slot,
+        });
 
         if (opponent.hp[part] <= 0) {
-          killed = true;
           opponent.alive = false;
           room.finished = true;
 
           const totalWins = addWin(attacker);
+          const finisher = isCritical ? 'body_break' : config.finisher;
 
           io.to(roomId).emit('game_over', {
             winnerSlot: attacker.slot,
             loserSlot: opponent.slot,
-            finisher: config.finisher, // 'decapitation' | 'head_explode' | 'surrender'
+            finisher, // 'ko_head' | 'ko_legs' | 'surrender' | 'body_break'
             part,
+            critical: isCritical,
             winnerWins: totalWins,
           });
         }
@@ -254,11 +272,11 @@ bot.start((ctx) => {
 
   ctx.reply(
     payload
-      ? '⚔️ Ты присоединяешься к бою! Жми кнопку ниже.'
-      : `⚔️ Бой создан! Отправь другу ссылку-приглашение:\n${inviteLink}\n\nКогда друг перейдёт по ней — начинайте бой.`,
+      ? '🥊 Ты присоединяешься к бою! Жми кнопку ниже.'
+      : `🥊 Бой создан! Отправь другу ссылку-приглашение:\n${inviteLink}\n\nКогда друг перейдёт по ней — начинайте бой.`,
     {
       reply_markup: {
-        inline_keyboard: [[{ text: '🗡 Открыть арену', web_app: { url: gameUrl } }]],
+        inline_keyboard: [[{ text: '🥊 Открыть октагон', web_app: { url: gameUrl } }]],
       },
     }
   );
