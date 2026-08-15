@@ -18,122 +18,39 @@ function resize() {
 }
 window.addEventListener('resize', resize);
 resize();
+setTimeout(resize, 300);
+if (tg) {
+  tg.onEvent('viewportChanged', resize);
+}
 
 const statusEl = document.getElementById('status');
-const hpBars = [document.getElementById('hp0'), document.getElementById('hp1')];
-const stBars = [document.getElementById('st0'), document.getElementById('st1')];
-const koScreen = document.getElementById('ko-screen');
-const koSub = document.getElementById('ko-sub');
+const hpBars = {
+  0: {
+    head: document.getElementById('hp0-head'),
+    torso: document.getElementById('hp0-torso'),
+    legs: document.getElementById('hp0-legs'),
+  },
+  1: {
+    head: document.getElementById('hp1-head'),
+    torso: document.getElementById('hp1-torso'),
+    legs: document.getElementById('hp1-legs'),
+  },
+};
+const staminaBar = document.getElementById('stamina-bar');
 
 let mySlot = null;
 let players = {};
 let attackFlashSlot = null;
+let attackTarget = {};
 let attackStartTime = {};
 const prevX = {};
 const walkPhase = {};
 let particles = [];
 let sparks = [];
-let bloodPools = [];
 let shake = 0;
-const fallProgress = {};
-const blockFlash = {};
-
-// ---------- ИСТОРИЯ ДЛЯ ПОВТОРА ----------
-let history = [];
-const HISTORY_MAX = 90;
-let replay = null; // {frames, index, loserSlot, winnerSlot}
-
-const settings = {
-  sound: localStorage.getItem('sword_sound') !== 'off',
-  gore: localStorage.getItem('sword_gore') === 'on',
-};
-const soundToggle = document.getElementById('toggle-sound');
-const goreToggle = document.getElementById('toggle-gore');
-function syncToggles() {
-  soundToggle.classList.toggle('on', settings.sound);
-  goreToggle.classList.toggle('on', settings.gore);
-}
-syncToggles();
-soundToggle.addEventListener('click', function () {
-  settings.sound = !settings.sound;
-  localStorage.setItem('sword_sound', settings.sound ? 'on' : 'off');
-  syncToggles();
-});
-goreToggle.addEventListener('click', function () {
-  settings.gore = !settings.gore;
-  localStorage.setItem('sword_gore', settings.gore ? 'on' : 'off');
-  syncToggles();
-});
-document.getElementById('settings-btn').addEventListener('click', function () {
-  document.getElementById('settings-modal').classList.add('open');
-});
-document.getElementById('close-settings').addEventListener('click', function () {
-  document.getElementById('settings-modal').classList.remove('open');
-});
-
-let audioCtx = null;
-function ensureAudio() {
-  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  if (audioCtx.state === 'suspended') audioCtx.resume();
-}
-function beep(opts) {
-  const freq = opts.freq || 440;
-  const duration = opts.duration || 0.1;
-  const type = opts.type || 'sine';
-  const volume = opts.volume || 0.15;
-  const sweep = opts.sweep || null;
-  if (!settings.sound || !audioCtx) return;
-  const osc = audioCtx.createOscillator();
-  const gain = audioCtx.createGain();
-  osc.type = type;
-  osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-  if (sweep) osc.frequency.exponentialRampToValueAtTime(sweep, audioCtx.currentTime + duration);
-  gain.gain.setValueAtTime(volume, audioCtx.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
-  osc.connect(gain).connect(audioCtx.destination);
-  osc.start();
-  osc.stop(audioCtx.currentTime + duration);
-}
-function noiseSwing() {
-  if (!settings.sound || !audioCtx) return;
-  const bufferSize = audioCtx.sampleRate * 0.15;
-  const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
-  const data = buffer.getChannelData(0);
-  for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
-  const src = audioCtx.createBufferSource();
-  src.buffer = buffer;
-  const filter = audioCtx.createBiquadFilter();
-  filter.type = 'highpass';
-  filter.frequency.value = 1500;
-  const gain = audioCtx.createGain();
-  gain.gain.value = 0.2;
-  src.connect(filter).connect(gain).connect(audioCtx.destination);
-  src.start();
-}
-function playSwing() { noiseSwing(); }
-function playClash() { beep({ freq: 1200, duration: 0.12, type: 'square', volume: 0.18, sweep: 400 }); }
-function playHit() { beep({ freq: 180, duration: 0.15, type: 'sawtooth', volume: 0.2, sweep: 60 }); }
-function playBlock() { beep({ freq: 700, duration: 0.08, type: 'square', volume: 0.14, sweep: 500 }); }
-function playStep() { beep({ freq: 90, duration: 0.05, type: 'triangle', volume: 0.06 }); }
-function playKO() { beep({ freq: 90, duration: 0.5, type: 'sawtooth', volume: 0.25, sweep: 30 }); }
-let ambientStarted = false;
-function startAmbient() {
-  if (ambientStarted || !settings.sound) return;
-  ensureAudio();
-  ambientStarted = true;
-  const drone = audioCtx.createOscillator();
-  const droneGain = audioCtx.createGain();
-  drone.type = 'sine';
-  drone.frequency.value = 55;
-  droneGain.gain.value = 0.02;
-  drone.connect(droneGain).connect(audioCtx.destination);
-  drone.start();
-}
 
 document.getElementById('play-btn').addEventListener('click', function () {
-  ensureAudio();
-  startAmbient();
-  document.getElementById('menu-screen').style.display = 'none';
+  document.getElementById('menu-overlay').style.display = 'none';
 });
 
 const socket = io();
@@ -141,8 +58,8 @@ socket.emit('get_stats');
 socket.emit('join_room', { roomId: roomId });
 
 socket.on('stats_update', function (data) {
-  document.getElementById('stat-online').textContent = data.online;
-  document.getElementById('stat-games').textContent = data.totalGames;
+  const el = document.getElementById('online-count');
+  if (el) el.textContent = data.online;
 });
 socket.on('joined', function (data) {
   mySlot = data.slot;
@@ -153,12 +70,6 @@ socket.on('opponent_joined', function (data) { players = data.players; });
 socket.on('start_game', function (data) {
   players = data.players;
   statusEl.textContent = '';
-  koScreen.classList.remove('show');
-  fallProgress[0] = 0;
-  fallProgress[1] = 0;
-  replay = null;
-  history = [];
-  updateHpBars();
 });
 socket.on('state_update', function (p) {
   players = p;
@@ -166,103 +77,100 @@ socket.on('state_update', function (p) {
 });
 socket.on('attack_anim', function (data) {
   attackFlashSlot = data.slot;
+  attackTarget[data.slot] = data.target;
   attackStartTime[data.slot] = performance.now();
-  playSwing();
   setTimeout(function () { attackFlashSlot = null; }, 220);
 });
 socket.on('hit_landed', function (data) {
-  playClash();
-  setTimeout(playHit, 60);
-  shake = 10;
+  shake = data.part === 'legs' ? 12 : 8;
   const p = Object.values(players).find(function (pl) { return pl.slot === data.targetSlot; });
-  if (p) spawnHitEffect(p, false);
+  if (p) spawnHitEffect(p, data.part);
+  spawnHudBlood(data.targetSlot, data.part);
 });
-socket.on('block_landed', function (data) {
-  playBlock();
-  shake = 4;
-  blockFlash[data.targetSlot] = performance.now();
-});
-socket.on('attack_denied', function () {
-  beep({ freq: 220, duration: 0.1, type: 'square', volume: 0.1 });
-});
-socket.on('knockout', function (data) {
-  playKO();
-  shake = 18;
-  const p = Object.values(players).find(function (pl) { return pl.slot === data.loserSlot; });
-  if (p) spawnHitEffect(p, true);
-
-  const frames = history.slice(-40);
-  if (frames.length > 4) {
-    replay = { frames: frames, index: 0, winnerSlot: data.winnerSlot, loserSlot: data.loserSlot };
-  } else {
-    scheduleKoScreen(data.winnerSlot);
-  }
+socket.on('too_tired', function () {
+  statusEl.textContent = 'Не хватает выносливости';
+  setTimeout(function () {
+    if (statusEl.textContent === 'Не хватает выносливости') statusEl.textContent = '';
+  }, 500);
 });
 socket.on('room_full', function () { statusEl.textContent = 'Комната уже занята'; });
 socket.on('opponent_left', function () { statusEl.textContent = 'Соперник вышел из боя'; });
-
-document.getElementById('rematch-btn').addEventListener('click', function () {
-  socket.emit('rematch');
+socket.on('game_over', function (data) {
+  statusEl.textContent = data.winnerSlot === mySlot ? '🏆 Победа!' : '💀 Поражение';
 });
-
-function scheduleKoScreen(winnerSlot) {
-  setTimeout(function () {
-    koSub.textContent = winnerSlot === mySlot ? 'Ты победил нокаутом!' : 'Соперник победил нокаутом';
-    koScreen.classList.add('show');
-  }, 900);
-}
 
 function updateHpBars() {
   Object.values(players).forEach(function (p) {
-    if (hpBars[p.slot]) hpBars[p.slot].style.width = p.hp + '%';
-    if (stBars[p.slot]) stBars[p.slot].style.width = p.stamina + '%';
+    const bars = hpBars[p.slot];
+    if (bars) {
+      bars.head.style.width = p.parts.head + '%';
+      bars.torso.style.width = p.parts.torso + '%';
+      bars.legs.style.width = p.parts.legs + '%';
+    }
+    if (p.slot === mySlot && staminaBar) {
+      staminaBar.style.width = p.stamina + '%';
+    }
   });
 }
 
-// ---------- ЭФФЕКТЫ ----------
-function spawnHitEffect(p, big) {
+// ---------- КРОВЬ НА ШКАЛЕ ----------
+function spawnHudBlood(slot, part) {
+  const bar = hpBars[slot] && hpBars[slot][part];
+  if (!bar) return;
+  const parentRect = bar.parentElement.getBoundingClientRect();
+  const pct = parseFloat(bar.style.width) || 0;
+  const edgeX = parentRect.left + parentRect.width * (pct / 100);
+  for (let i = 0; i < 3; i++) {
+    const drop = document.createElement('div');
+    drop.style.position = 'fixed';
+    drop.style.left = (edgeX - 2 + Math.random() * 4) + 'px';
+    drop.style.top = parentRect.top + 'px';
+    drop.style.width = '4px';
+    drop.style.height = '4px';
+    drop.style.borderRadius = '50%';
+    drop.style.background = '#c8102e';
+    drop.style.zIndex = '20';
+    drop.style.pointerEvents = 'none';
+    drop.style.transition = 'transform 0.45s ease-in, opacity 0.45s ease-in';
+    document.body.appendChild(drop);
+    requestAnimationFrame(function () {
+      drop.style.transform = 'translateY(' + (10 + Math.random() * 8) + 'px)';
+      drop.style.opacity = '0';
+    });
+    setTimeout(function () { drop.remove(); }, 500);
+  }
+}
+
+// ---------- ЭФФЕКТЫ НА АРЕНЕ ----------
+function spawnHitEffect(p, part) {
   const scale = cssW / 800;
   const px = p.x * scale;
   const groundY = cssH * 0.82;
-  const count = settings.gore ? (big ? 26 : 16) : (big ? 12 : 8);
-  const color = settings.gore ? '#c8102e' : '#ffe066';
-  for (let i = 0; i < count; i++) {
+  const partY = part === 'head' ? groundY - 80 : part === 'legs' ? groundY - 15 : groundY - 50;
+  for (let i = 0; i < 6; i++) {
     particles.push({
-      x: px, y: groundY - 55,
-      vx: (Math.random() - 0.5) * (big ? 8 : 6), vy: -Math.random() * (big ? 7 : 5) - 1,
-      life: 1, color: color, size: settings.gore ? 3 + Math.random() * 3 : 2 + Math.random() * 2,
-      gravity: settings.gore ? 0.45 : 0.35,
+      x: px, y: partY,
+      vx: (Math.random() - 0.5) * 5, vy: -Math.random() * 4 - 1,
+      life: 1, color: '#c8102e', size: 2 + Math.random() * 2,
     });
   }
-  for (let i = 0; i < (big ? 16 : 10); i++) {
+  for (let i = 0; i < 8; i++) {
     const angle = Math.random() * Math.PI * 2;
     sparks.push({
-      x: px, y: groundY - 55,
-      vx: Math.cos(angle) * (2 + Math.random() * 4),
-      vy: Math.sin(angle) * (2 + Math.random() * 4),
+      x: px, y: partY,
+      vx: Math.cos(angle) * (2 + Math.random() * 3),
+      vy: Math.sin(angle) * (2 + Math.random() * 3),
       life: 1,
     });
   }
-  if (settings.gore) {
-    bloodPools.push({ x: px, y: groundY, r: 0, maxR: big ? 26 : 14, life: 1 });
-  }
 }
 function updateParticles() {
-  particles.forEach(function (pt) { pt.x += pt.vx; pt.y += pt.vy; pt.vy += pt.gravity || 0.35; pt.life -= 0.03; });
+  particles.forEach(function (pt) { pt.x += pt.vx; pt.y += pt.vy; pt.vy += 0.35; pt.life -= 0.04; });
   particles = particles.filter(function (pt) { return pt.life > 0; });
-  sparks.forEach(function (s) { s.x += s.vx; s.y += s.vy; s.life -= 0.06; });
+  sparks.forEach(function (s) { s.x += s.vx; s.y += s.vy; s.life -= 0.07; });
   sparks = sparks.filter(function (s) { return s.life > 0; });
-  bloodPools.forEach(function (b) { if (b.r < b.maxR) b.r += 0.6; b.life -= 0.003; });
-  bloodPools = bloodPools.filter(function (b) { return b.life > 0; });
 }
 function drawParticles() {
-  bloodPools.forEach(function (b) {
-    ctx.globalAlpha = Math.min(b.life, 0.6);
-    ctx.fillStyle = '#7a0d1a';
-    ctx.beginPath();
-    ctx.ellipse(b.x, b.y, b.r, b.r * 0.35, 0, 0, Math.PI * 2);
-    ctx.fill();
-  });
   particles.forEach(function (pt) {
     ctx.globalAlpha = Math.max(pt.life, 0);
     ctx.fillStyle = pt.color;
@@ -272,7 +180,7 @@ function drawParticles() {
   });
   sparks.forEach(function (s) {
     ctx.globalAlpha = Math.max(s.life, 0);
-    ctx.strokeStyle = '#fff6c8';
+    ctx.strokeStyle = '#ffb3b3';
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(s.x, s.y);
@@ -282,20 +190,11 @@ function drawParticles() {
   ctx.globalAlpha = 1;
 }
 
-// перчатка: манжета + округлый кулак + большой палец + блик
-function drawGlove(cx, cy, angle, teamColor) {
+function drawGlove(cx, cy, teamColor) {
   ctx.save();
   ctx.translate(cx, cy);
-  ctx.rotate(angle || 0);
-
-  // манжета
   ctx.fillStyle = teamColor;
   ctx.fillRect(-4, -9, 8, 6);
-  ctx.strokeStyle = 'rgba(0,0,0,0.35)';
-  ctx.lineWidth = 1;
-  ctx.strokeRect(-4, -9, 8, 6);
-
-  // основной кулак (градиент для объёма)
   const gGrad = ctx.createRadialGradient(-2, -2, 1, 0, 0, 8);
   gGrad.addColorStop(0, '#ff6b6b');
   gGrad.addColorStop(0.6, '#d81f2e');
@@ -307,30 +206,6 @@ function drawGlove(cx, cy, angle, teamColor) {
   ctx.strokeStyle = 'rgba(0,0,0,0.35)';
   ctx.lineWidth = 1;
   ctx.stroke();
-
-  // большой палец
-  ctx.fillStyle = '#c8182a';
-  ctx.beginPath();
-  ctx.ellipse(-6, -1, 3, 4, 0.3, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(0,0,0,0.3)';
-  ctx.lineWidth = 0.8;
-  ctx.stroke();
-
-  // шов/линии на костяшках
-  ctx.strokeStyle = 'rgba(0,0,0,0.25)';
-  ctx.lineWidth = 0.8;
-  ctx.beginPath();
-  ctx.moveTo(-4, -3); ctx.lineTo(4, -3);
-  ctx.moveTo(-4, 1); ctx.lineTo(4, 1);
-  ctx.stroke();
-
-  // блик
-  ctx.fillStyle = 'rgba(255,255,255,0.35)';
-  ctx.beginPath();
-  ctx.ellipse(-2, -3, 2, 1.4, -0.4, 0, Math.PI * 2);
-  ctx.fill();
-
   ctx.restore();
 }
 
@@ -349,31 +224,6 @@ function drawArenaBackground(groundY) {
   ctx.fillStyle = light;
   ctx.fillRect(0, 0, cssW, cssH);
 
-  ctx.save();
-  ctx.strokeStyle = 'rgba(200,200,200,0.25)';
-  ctx.lineWidth = 2;
-  const cx = cssW / 2;
-  const cy = groundY - cssH * 0.16;
-  const r = cssW * 0.62;
-  ctx.beginPath();
-  for (let i = 0; i < 8; i++) {
-    const a = (Math.PI / 4) * i - Math.PI / 8;
-    const px = cx + Math.cos(a) * r;
-    const py = cy + Math.sin(a) * r * 0.32;
-    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-  }
-  ctx.closePath();
-  ctx.stroke();
-  ctx.strokeStyle = 'rgba(180,180,180,0.12)';
-  ctx.lineWidth = 1;
-  for (let i = -6; i <= 6; i++) {
-    ctx.beginPath();
-    ctx.moveTo(cx + i * (cssW / 14), cy - cssH * 0.05);
-    ctx.lineTo(cx + i * (cssW / 14), groundY);
-    ctx.stroke();
-  }
-  ctx.restore();
-
   const floor = ctx.createLinearGradient(0, groundY, 0, cssH);
   floor.addColorStop(0, 'rgba(0,0,0,0.5)');
   floor.addColorStop(1, 'rgba(0,0,0,0.1)');
@@ -388,8 +238,8 @@ function drawArenaBackground(groundY) {
   ctx.stroke();
 }
 
-// ---------- РИСОВАНИЕ ОДНОГО БОЙЦА (более анатомичный силуэт) ----------
-function drawFighter(p, groundY, scale, isBlocking, isAttacking, swingT) {
+// ---------- БОЕЦ ----------
+function drawFighter(p, groundY, scale, isAttacking, swingT, target) {
   const x = p.x * scale;
   const y = groundY;
   const color = p.slot === 0 ? '#3f8a5c' : '#a13f3f';
@@ -397,29 +247,21 @@ function drawFighter(p, groundY, scale, isBlocking, isAttacking, swingT) {
   const skin = '#e8b088';
   const skinDark = '#b87d54';
 
-  if (fallProgress[p.slot] === undefined) fallProgress[p.slot] = 0;
-  if (p.knockedOut && fallProgress[p.slot] < 1) {
-    fallProgress[p.slot] = Math.min(1, fallProgress[p.slot] + 0.045);
-  }
-  const fallT = fallProgress[p.slot];
-  const fallAngle = fallT * (Math.PI / 2) * p.facing * -1;
-  const fallLift = Math.sin(fallT * Math.PI) * -8;
-
   const last = prevX[p.slot];
-  const moving = !p.knockedOut && last !== undefined && Math.abs(x - last) > 0.3;
+  const moving = last !== undefined && Math.abs(x - last) > 0.3;
   prevX[p.slot] = x;
   if (!walkPhase[p.slot]) walkPhase[p.slot] = 0;
-  if (moving) {
-    walkPhase[p.slot] += 0.35;
-    if (Math.floor(walkPhase[p.slot]) % 6 === 0) playStep();
-  }
+  if (moving) walkPhase[p.slot] += 0.35;
   const legSwing = moving ? Math.sin(walkPhase[p.slot]) * 7 : 0;
+  const armCounterSwing = moving ? -Math.sin(walkPhase[p.slot]) * 8 : 0;
   const bob = moving ? Math.abs(Math.sin(walkPhase[p.slot])) * 3 : 0;
-  const blockGlow = blockFlash[p.slot] && performance.now() - blockFlash[p.slot] < 200;
+  const lean = moving ? p.facing * 1.5 : 0;
+
+  const isKick = isAttacking && target === 'legs';
 
   ctx.save();
-  ctx.translate(x, y + fallLift);
-  ctx.rotate(fallAngle);
+  ctx.translate(x, y);
+  ctx.rotate(lean * 0.02);
   ctx.translate(-x, -y);
 
   // тень
@@ -428,17 +270,28 @@ function drawFighter(p, groundY, scale, isBlocking, isAttacking, swingT) {
   ctx.ellipse(x, y + 3, 23, 6, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  // ноги (бёдра шире, голени уже, с разделением на колене)
+  // задняя (опорная) нога
   const legGrad = ctx.createLinearGradient(x - 14, y - 28, x + 14, y);
   legGrad.addColorStop(0, '#241a12');
   legGrad.addColorStop(1, '#3a2a1c');
   ctx.fillStyle = legGrad;
-  ctx.fillRect(x - 13 + legSwing * 0.3, y - 30 - bob, 10, 16);
-  ctx.fillRect(x - 12 + legSwing * 0.5, y - 15 - bob, 8, 15);
-  ctx.fillRect(x + 3 - legSwing * 0.3, y - 30 - bob, 10, 16);
-  ctx.fillRect(x + 4 - legSwing * 0.5, y - 15 - bob, 8, 15);
+  ctx.fillRect(x - 13 - p.facing * 2 - legSwing * 0.3, y - 30 - bob, 10, 30);
 
-  // торс: трапеция (плечи шире талии) с мышечной светотенью
+  // передняя нога — обычная ходьба, либо удар ногой
+  if (isKick) {
+    const kickExt = Math.sin(swingT * Math.PI);
+    ctx.save();
+    ctx.translate(x + p.facing * 6, y - 20 - bob);
+    ctx.rotate(p.facing * (0.3 + kickExt * 1.1));
+    ctx.fillStyle = legGrad;
+    ctx.fillRect(-6, -10, 12, 24 + kickExt * 10);
+    ctx.restore();
+  } else {
+    ctx.fillStyle = legGrad;
+    ctx.fillRect(x + 3 + p.facing * 2 + legSwing * 0.3, y - 30 - bob, 10, 30);
+  }
+
+  // торс
   const shT = y - 66 - bob, shB = y - 26 - bob;
   ctx.beginPath();
   ctx.moveTo(x - 17, shT);
@@ -447,33 +300,25 @@ function drawFighter(p, groundY, scale, isBlocking, isAttacking, swingT) {
   ctx.lineTo(x - 11, shB);
   ctx.closePath();
   const bodyGrad = ctx.createLinearGradient(x - 17, shT, x + 17, shB);
-  bodyGrad.addColorStop(0, isBlocking ? '#5a80b8' : color);
-  bodyGrad.addColorStop(1, isBlocking ? '#25406e' : colorDark);
+  bodyGrad.addColorStop(0, color);
+  bodyGrad.addColorStop(1, colorDark);
   ctx.fillStyle = bodyGrad;
   ctx.fill();
-  ctx.strokeStyle = blockGlow ? 'rgba(120,180,255,0.9)' : 'rgba(0,0,0,0.3)';
-  ctx.lineWidth = blockGlow ? 3 : 1.3;
-  ctx.stroke();
-  // линия пресса
-  ctx.strokeStyle = 'rgba(0,0,0,0.2)';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(x, shT + 6);
-  ctx.lineTo(x, shB - 2);
+  ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+  ctx.lineWidth = 1.3;
   ctx.stroke();
 
-  // шорты
   ctx.fillStyle = colorDark;
   ctx.fillRect(x - 13, shB - 2, 26, 10);
 
-  // свободная рука (в перчатке)
+  // задняя рука (противофаза шагу)
   ctx.fillStyle = skinDark;
-  ctx.fillRect(x - p.facing * 21 - 3, y - 63 - bob, 6, 12);
+  ctx.fillRect(x - p.facing * 21 - 3 + armCounterSwing * 0.2, y - 63 - bob, 6, 12);
   ctx.fillStyle = colorDark;
-  ctx.fillRect(x - p.facing * 21 - 3, y - 52 - bob, 6, 12);
-  drawGlove(x - p.facing * 21, y - 38 - bob, 0, colorDark);
+  ctx.fillRect(x - p.facing * 21 - 3 + armCounterSwing * 0.2, y - 52 - bob, 6, 12);
+  drawGlove(x - p.facing * 21 + armCounterSwing * 0.2, y - 38 - bob, colorDark);
 
-  // шея + голова (более круглая, с волосами и челюстью)
+  // голова
   ctx.fillStyle = skinDark;
   ctx.fillRect(x - 4, y - 70 - bob, 8, 6);
   const headGrad = ctx.createRadialGradient(x - 5, y - 84 - bob, 2, x, y - 79 - bob, 14);
@@ -483,138 +328,60 @@ function drawFighter(p, groundY, scale, isBlocking, isAttacking, swingT) {
   ctx.beginPath();
   ctx.arc(x, y - 80 - bob, 13, 0, Math.PI * 2);
   ctx.fill();
-  // волосы
   ctx.fillStyle = '#2a1c12';
   ctx.beginPath();
   ctx.arc(x, y - 87 - bob, 13, Math.PI, 0);
   ctx.fill();
 
   ctx.fillStyle = '#1a1410';
-  if (p.knockedOut) {
-    ctx.beginPath();
-    ctx.moveTo(x - 6, y - 83 - bob); ctx.lineTo(x - 2, y - 79 - bob);
-    ctx.moveTo(x - 2, y - 83 - bob); ctx.lineTo(x - 6, y - 79 - bob);
-    ctx.moveTo(x + 2, y - 83 - bob); ctx.lineTo(x + 6, y - 79 - bob);
-    ctx.moveTo(x + 6, y - 83 - bob); ctx.lineTo(x + 2, y - 79 - bob);
-    ctx.strokeStyle = '#1a1410';
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-  } else {
-    const eyeShift = p.facing * 4;
-    ctx.beginPath();
-    ctx.arc(x + eyeShift - 3, y - 81 - bob, 1.6, 0, Math.PI * 2);
-    ctx.arc(x + eyeShift + 3, y - 81 - bob, 1.6, 0, Math.PI * 2);
-    ctx.fill();
-  }
+  const eyeShift = p.facing * 4;
+  ctx.beginPath();
+  ctx.arc(x + eyeShift - 3, y - 81 - bob, 1.6, 0, Math.PI * 2);
+  ctx.arc(x + eyeShift + 3, y - 81 - bob, 1.6, 0, Math.PI * 2);
+  ctx.fill();
 
-  if (!p.knockedOut) {
-    const shoulderX = x + p.facing * 15;
-    const shoulderY = y - 63 - bob;
+  // передняя (ударная) рука
+  const shoulderX = x + p.facing * 15;
+  const shoulderY = y - 63 - bob;
+  const guardAngle = p.facing === 1 ? -0.95 : Math.PI + 0.95;
+  const punchAngle = p.facing === 1 ? -0.08 : Math.PI + 0.08;
+  const isPunch = isAttacking && !isKick;
+  const extension = isPunch ? Math.sin(swingT * Math.PI) : 0;
+  const armAngle = guardAngle + (punchAngle - guardAngle) * extension;
+  const aimLift = isPunch && target === 'head' ? -6 * extension : 0;
 
-    // манера покоя: кулак у подбородка (гард), при ударе рука распрямляется вперёд
-    const guardAngle = isBlocking
-      ? (p.facing === 1 ? -1.35 : Math.PI + 1.35)
-      : (p.facing === 1 ? -0.95 : Math.PI + 0.95);
-    const punchAngle = p.facing === 1 ? -0.08 : Math.PI + 0.08;
-    const extension = isAttacking ? Math.sin(swingT * Math.PI) : 0;
-    const armAngle = guardAngle + (punchAngle - guardAngle) * extension;
-
-    const upperLen = 11;
-    const forearmBase = 11;
-    const forearmExtra = 20 * extension;
-    const forearmLen = forearmBase + forearmExtra;
-
-    ctx.save();
-    ctx.translate(shoulderX, shoulderY);
-    ctx.rotate(armAngle);
-
-    // плечевая мышца
-    const armGrad = ctx.createLinearGradient(-4, 0, 4, upperLen);
-    armGrad.addColorStop(0, color);
-    armGrad.addColorStop(1, colorDark);
-    ctx.fillStyle = armGrad;
-    ctx.beginPath();
-    ctx.ellipse(0, upperLen / 2, 5, upperLen / 2 + 1, 0, 0, Math.PI * 2);
-    ctx.fill();
-
-    // предплечье (вытягивается при ударе)
-    ctx.translate(0, upperLen);
-    ctx.fillStyle = skinDark;
-    ctx.fillRect(-3.5, 0, 7, forearmLen);
-    ctx.strokeStyle = 'rgba(0,0,0,0.25)';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(-3.5, 0, 7, forearmLen);
-
-    // смаз-полоса в момент выброса руки
-    if (isAttacking && extension > 0.15) {
-      ctx.strokeStyle = 'rgba(255,255,255,' + (0.4 * extension) + ')';
-      ctx.lineWidth = 5;
-      ctx.beginPath();
-      ctx.moveTo(0, forearmLen * 0.2);
-      ctx.lineTo(0, forearmLen * 0.85);
-      ctx.stroke();
-    }
-
-    drawGlove(0, forearmLen, 0, colorDark);
-    ctx.restore();
-  }
-
-  ctx.restore();
-}
-
-// ---------- ОСНОВНОЙ ЦИКЛ ----------
-function pushHistory() {
-  const snap = { p: {} };
-  Object.keys(players).forEach(function (id) {
-    const p = players[id];
-    snap.p[p.slot] = { x: p.x, facing: p.facing, blocking: p.blocking };
-  });
-  snap.atkSlot = attackFlashSlot;
-  snap.atkT = attackFlashSlot !== null && attackStartTime[attackFlashSlot]
-    ? Math.min((performance.now() - attackStartTime[attackFlashSlot]) / 220, 1)
-    : 0;
-  history.push(snap);
-  if (history.length > HISTORY_MAX) history.shift();
-}
-
-function drawReplay(groundY, scale) {
-  const frame = replay.frames[Math.floor(replay.index)];
-  if (!frame) { replay = null; scheduleKoScreen(replay ? replay.winnerSlot : mySlot); return; }
-
-  const p0 = frame.p[0], p1 = frame.p[1];
-  const midX = ((p0 ? p0.x : 0) + (p1 ? p1.x : 0)) / 2 * scale;
+  const upperLen = 11;
+  const forearmLen = 11 + 20 * extension;
 
   ctx.save();
-  const zoom = 1.6;
-  ctx.translate(cssW / 2, cssH * 0.55);
-  ctx.scale(zoom, zoom);
-  ctx.translate(-midX, -cssH * 0.55);
+  ctx.translate(shoulderX, shoulderY + aimLift);
+  ctx.rotate(armAngle);
 
-  drawArenaBackground(groundY);
-  [p0, p1].forEach(function (pd, slot) {
-    if (!pd) return;
-    const isAtk = frame.atkSlot === slot;
-    drawFighter({ x: pd.x, facing: pd.facing, slot: slot, hp: 50, stamina: 50, blocking: pd.blocking, knockedOut: false },
-      groundY, scale, pd.blocking, isAtk, frame.atkT);
-  });
+  const armGrad = ctx.createLinearGradient(-4, 0, 4, upperLen);
+  armGrad.addColorStop(0, color);
+  armGrad.addColorStop(1, colorDark);
+  ctx.fillStyle = armGrad;
+  ctx.beginPath();
+  ctx.ellipse(0, upperLen / 2, 5, upperLen / 2 + 1, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.translate(0, upperLen);
+  ctx.fillStyle = skinDark;
+  ctx.fillRect(-3.5, 0, 7, forearmLen);
+
+  if (isPunch && extension > 0.15) {
+    ctx.strokeStyle = 'rgba(255,255,255,' + (0.4 * extension) + ')';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(0, forearmLen * 0.2);
+    ctx.lineTo(0, forearmLen * 0.85);
+    ctx.stroke();
+  }
+
+  drawGlove(0, forearmLen, colorDark);
   ctx.restore();
 
-  ctx.fillStyle = 'rgba(0,0,0,0.25)';
-  ctx.fillRect(0, 0, cssW, cssH);
-  ctx.fillStyle = '#ff3b3b';
-  ctx.font = 'bold 22px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.shadowColor = '#000';
-  ctx.shadowBlur = 8;
-  ctx.fillText('⏪ ПОВТОР', cssW / 2, 40);
-  ctx.shadowBlur = 0;
-
-  replay.index += 0.45;
-  if (replay.index >= replay.frames.length) {
-    const winnerSlot = replay.winnerSlot;
-    replay = null;
-    scheduleKoScreen(winnerSlot);
-  }
+  ctx.restore();
 }
 
 function draw() {
@@ -628,25 +395,21 @@ function draw() {
   ctx.clearRect(-20, -20, cssW + 40, cssH + 40);
   const scale = cssW / 800;
   const groundY = cssH * 0.82;
+  drawArenaBackground(groundY);
 
-  if (replay) {
-    drawReplay(groundY, scale);
-  } else {
-    drawArenaBackground(groundY);
-    pushHistory();
-    Object.values(players).forEach(function (p) {
-      const isAttacking = attackFlashSlot === p.slot;
-      let swingT = 0;
-      if (isAttacking && attackStartTime[p.slot]) {
-        swingT = Math.min((performance.now() - attackStartTime[p.slot]) / 220, 1);
-      }
-      drawFighter(p, groundY, scale, p.blocking, isAttacking, swingT);
-    });
-    updateParticles();
-    drawParticles();
-  }
+  Object.values(players).forEach(function (p) {
+    const isAttacking = attackFlashSlot === p.slot;
+    let swingT = 0;
+    if (isAttacking && attackStartTime[p.slot]) {
+      swingT = Math.min((performance.now() - attackStartTime[p.slot]) / 220, 1);
+    }
+    drawFighter(p, groundY, scale, isAttacking, swingT, attackTarget[p.slot]);
+  });
 
+  updateParticles();
+  drawParticles();
   ctx.restore();
+
   requestAnimationFrame(draw);
 }
 draw();
@@ -659,10 +422,10 @@ let moveInterval = null;
 let currentDir = 0;
 
 function setKnob(dx) {
-  const max = 32;
+  const max = 45;
   const clampedX = Math.max(-max, Math.min(max, dx));
-  knob.style.left = 33 + clampedX + 'px';
-  knob.style.top = '33px';
+  knob.style.left = (51 + clampedX) + 'px';
+  knob.style.top = '51px';
 }
 function startMoveLoop() {
   if (moveInterval) return;
@@ -671,7 +434,7 @@ function startMoveLoop() {
   }, 40);
 }
 function stopMoveLoop() { clearInterval(moveInterval); moveInterval = null; }
-function handleStart() { ensureAudio(); dragging = true; startMoveLoop(); }
+function handleStart(e) { e.preventDefault(); dragging = true; startMoveLoop(); }
 function handleMove(e) {
   if (!dragging) return;
   const touch = e.touches ? e.touches[0] : e;
@@ -680,39 +443,26 @@ function handleMove(e) {
   setKnob(dx);
   currentDir = dx > 15 ? 1 : dx < -15 ? -1 : 0;
 }
-function handleEnd() { dragging = false; currentDir = 0; knob.style.left = '33px'; stopMoveLoop(); }
+function handleEnd() { dragging = false; currentDir = 0; knob.style.left = '51px'; stopMoveLoop(); }
 
-zone.addEventListener('touchstart', handleStart);
-zone.addEventListener('touchmove', handleMove);
+zone.addEventListener('touchstart', handleStart, { passive: false });
+zone.addEventListener('touchmove', handleMove, { passive: false });
 zone.addEventListener('touchend', handleEnd);
 zone.addEventListener('mousedown', handleStart);
 window.addEventListener('mousemove', handleMove);
 window.addEventListener('mouseup', handleEnd);
 
-// ---------- БЛОК ----------
-const blockBtn = document.getElementById('block-btn');
-function blockStart(e) {
-  e.preventDefault();
-  ensureAudio();
-  blockBtn.classList.add('active');
-  socket.emit('block_start');
+// ---------- АТАКИ ----------
+function bindAttack(id, target) {
+  const btn = document.getElementById(id);
+  if (!btn) return;
+  function fire(e) {
+    e.preventDefault();
+    socket.emit('attack', { target: target });
+  }
+  btn.addEventListener('touchstart', fire, { passive: false });
+  btn.addEventListener('mousedown', fire);
 }
-function blockEnd(e) {
-  if (e) e.preventDefault();
-  blockBtn.classList.remove('active');
-  socket.emit('block_end');
-}
-blockBtn.addEventListener('touchstart', blockStart);
-blockBtn.addEventListener('touchend', blockEnd);
-blockBtn.addEventListener('mousedown', blockStart);
-blockBtn.addEventListener('mouseup', blockEnd);
-
-// ---------- УДАР ----------
-const attackBtn = document.getElementById('attack-btn');
-function doAttack(e) {
-  e.preventDefault();
-  ensureAudio();
-  socket.emit('attack');
-}
-attackBtn.addEventListener('touchstart', doAttack);
-attackBtn.addEventListener('mousedown', doAttack);
+bindAttack('attack-btn', 'head');
+bindAttack('hand-btn', 'torso');
+bindAttack('kick-btn', 'legs');
