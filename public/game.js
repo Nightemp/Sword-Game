@@ -6,552 +6,644 @@ const roomId = params.get('room') || tg?.initDataUnsafe?.start_param || 'default
 
 const canvas = document.getElementById('arena');
 const ctx = canvas.getContext('2d');
+
+let dpr = Math.min(window.devicePixelRatio || 1, 3);
+let cssW = 0, cssH = 0;
 function resize() {
-  canvas.width = canvas.clientWidth;
-  canvas.height = canvas.clientHeight;
+  cssW = canvas.clientWidth;
+  cssH = canvas.clientHeight;
+  canvas.width = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 window.addEventListener('resize', resize);
 resize();
-setTimeout(resize, 300);
-if (tg) {
-  tg.onEvent('viewportChanged', resize);
-}
 
 const statusEl = document.getElementById('status');
-const hpBarEls = {
-  0: { head: document.getElementById('hp0-head'), torso: document.getElementById('hp0-torso'), legs: document.getElementById('hp0-legs') },
-  1: { head: document.getElementById('hp1-head'), torso: document.getElementById('hp1-torso'), legs: document.getElementById('hp1-legs') },
-};
-const staminaWrap = document.getElementById('stamina-wrap');
-const staminaBar = document.getElementById('stamina-bar');
-// Счётчик побед ("ПОБЕДЫ 0" на экране). Если в вашей верстке другой id — поменяйте здесь.
-const winsCountEl = document.getElementById('wins-count');
+const hpBars = [document.getElementById('hp0'), document.getElementById('hp1')];
+const stBars = [document.getElementById('st0'), document.getElementById('st1')];
+const koScreen = document.getElementById('ko-screen');
+const koSub = document.getElementById('ko-sub');
 
 let mySlot = null;
 let players = {};
-let attackFlash = null; // { slot, type }
-let bloodEffects = [];
-let sparkEffects = [];
-let hitMarkers = [];    // маркеры места попадания прямо на бойце
-let critFlash = 0;      // кадры вспышки "критический удар"
-let screenShake = 0;
-let gameEnded = false;
+let attackFlashSlot = null;
+let attackStartTime = {};
+const prevX = {};
+const walkPhase = {};
+let particles = [];
+let sparks = [];
+let bloodPools = [];
+let shake = 0;
+const fallProgress = {};
+const blockFlash = {};
 
-const PART_LABEL = { head: 'ГОЛОВА', torso: 'ТОРС', legs: 'НОГИ' };
+// ---------- ИСТОРИЯ ДЛЯ ПОВТОРА ----------
+let history = [];
+const HISTORY_MAX = 90;
+let replay = null; // {frames, index, loserSlot, winnerSlot}
 
-// анимация движения
-let lastX = {};
-let movingUntil = {};
-let walkPhase = { 0: 0, 1: 0 };
+const settings = {
+  sound: localStorage.getItem('sword_sound') !== 'off',
+  gore: localStorage.getItem('sword_gore') === 'on',
+};
+const soundToggle = document.getElementById('toggle-sound');
+const goreToggle = document.getElementById('toggle-gore');
+function syncToggles() {
+  soundToggle.classList.toggle('on', settings.sound);
+  goreToggle.classList.toggle('on', settings.gore);
+}
+syncToggles();
+soundToggle.addEventListener('click', function () {
+  settings.sound = !settings.sound;
+  localStorage.setItem('sword_sound', settings.sound ? 'on' : 'off');
+  syncToggles();
+});
+goreToggle.addEventListener('click', function () {
+  settings.gore = !settings.gore;
+  localStorage.setItem('sword_gore', settings.gore ? 'on' : 'off');
+  syncToggles();
+});
+document.getElementById('settings-btn').addEventListener('click', function () {
+  document.getElementById('settings-modal').classList.add('open');
+});
+document.getElementById('close-settings').addEventListener('click', function () {
+  document.getElementById('settings-modal').classList.remove('open');
+});
 
-function spawnBloodAt(x, y, count = 14) {
-  for (let i = 0; i < count; i++) {
-    bloodEffects.push({
-      x, y,
-      vx: (Math.random() - 0.5) * 5,
-      vy: -Math.random() * 3,
-      life: 30,
-      maxLife: 30,
-      size: Math.random() * 2.6 + 1.4
-    });
-  }
+let audioCtx = null;
+function ensureAudio() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+}
+function beep(opts) {
+  const freq = opts.freq || 440;
+  const duration = opts.duration || 0.1;
+  const type = opts.type || 'sine';
+  const volume = opts.volume || 0.15;
+  const sweep = opts.sweep || null;
+  if (!settings.sound || !audioCtx) return;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = type;
+  osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+  if (sweep) osc.frequency.exponentialRampToValueAtTime(sweep, audioCtx.currentTime + duration);
+  gain.gain.setValueAtTime(volume, audioCtx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+  osc.connect(gain).connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + duration);
+}
+function noiseSwing() {
+  if (!settings.sound || !audioCtx) return;
+  const bufferSize = audioCtx.sampleRate * 0.15;
+  const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
+  const src = audioCtx.createBufferSource();
+  src.buffer = buffer;
+  const filter = audioCtx.createBiquadFilter();
+  filter.type = 'highpass';
+  filter.frequency.value = 1500;
+  const gain = audioCtx.createGain();
+  gain.gain.value = 0.2;
+  src.connect(filter).connect(gain).connect(audioCtx.destination);
+  src.start();
+}
+function playSwing() { noiseSwing(); }
+function playClash() { beep({ freq: 1200, duration: 0.12, type: 'square', volume: 0.18, sweep: 400 }); }
+function playHit() { beep({ freq: 180, duration: 0.15, type: 'sawtooth', volume: 0.2, sweep: 60 }); }
+function playBlock() { beep({ freq: 700, duration: 0.08, type: 'square', volume: 0.14, sweep: 500 }); }
+function playStep() { beep({ freq: 90, duration: 0.05, type: 'triangle', volume: 0.06 }); }
+function playKO() { beep({ freq: 90, duration: 0.5, type: 'sawtooth', volume: 0.25, sweep: 30 }); }
+let ambientStarted = false;
+function startAmbient() {
+  if (ambientStarted || !settings.sound) return;
+  ensureAudio();
+  ambientStarted = true;
+  const drone = audioCtx.createOscillator();
+  const droneGain = audioCtx.createGain();
+  drone.type = 'sine';
+  drone.frequency.value = 55;
+  droneGain.gain.value = 0.02;
+  drone.connect(droneGain).connect(audioCtx.destination);
+  drone.start();
 }
 
-function spawnSparks(x, y, facing) {
-  for (let i = 0; i < 10; i++) {
-    sparkEffects.push({
-      x, y,
-      vx: facing * (Math.random() * 5 + 2),
-      vy: (Math.random() - 0.5) * 5,
-      life: 16,
-      maxLife: 16,
-      size: Math.random() * 2 + 1
-    });
-  }
-}
-
-// Координаты частей тела бойца на арене (совпадают с отрисовкой в drawFighter)
-function bodyPartPoint(player, part, scale) {
-  const x = player.x * scale;
-  const groundY = canvas.height - 90;
-  if (part === 'head') return { x, y: groundY - 76 };
-  if (part === 'torso') return { x, y: groundY - 45 };
-  return { x, y: groundY - 12 }; // legs
-}
+document.getElementById('play-btn').addEventListener('click', function () {
+  ensureAudio();
+  startAmbient();
+  document.getElementById('menu-screen').style.display = 'none';
+});
 
 const socket = io();
+socket.emit('get_stats');
+socket.emit('join_room', { roomId: roomId });
 
-const onlineCountEl = document.getElementById('online-count');
-socket.on('online_count', (count) => {
-  onlineCountEl.textContent = count;
+socket.on('stats_update', function (data) {
+  document.getElementById('stat-online').textContent = data.online;
+  document.getElementById('stat-games').textContent = data.totalGames;
 });
-
-const menuOverlay = document.getElementById('menu-overlay');
-const playBtn = document.getElementById('play-btn');
-
-playBtn.addEventListener('click', () => {
-  if (playBtn.textContent === 'ИГРАТЬ СНОВА') {
-    location.reload();
-    return;
-  }
-  menuOverlay.style.display = 'none';
-  socket.emit('join_room', { roomId, userId: tg?.initDataUnsafe?.user?.id || null });
-});
-
-socket.on('joined', (data) => {
+socket.on('joined', function (data) {
   mySlot = data.slot;
   players = data.players;
-  gameEnded = false;
   statusEl.textContent = 'Ждём соперника...';
-  staminaWrap.style.display = 'block';
-  if (winsCountEl && typeof data.wins === 'number') winsCountEl.textContent = data.wins;
-  updateHpBars();
-  updateStaminaBar();
 });
-
-socket.on('opponent_joined', (data) => {
+socket.on('opponent_joined', function (data) { players = data.players; });
+socket.on('start_game', function (data) {
   players = data.players;
-  updateHpBars();
-});
-
-socket.on('start_game', (data) => {
-  players = data.players;
-  gameEnded = false;
   statusEl.textContent = '';
+  koScreen.classList.remove('show');
+  fallProgress[0] = 0;
+  fallProgress[1] = 0;
+  replay = null;
+  history = [];
   updateHpBars();
 });
-
-socket.on('state_update', (p) => {
-  Object.values(p).forEach(np => {
-    const prevX = lastX[np.slot];
-    if (prevX !== undefined && Math.abs(np.x - prevX) > 0.3) {
-      movingUntil[np.slot] = Date.now() + 150;
-    }
-    lastX[np.slot] = np.x;
-  });
+socket.on('state_update', function (p) {
   players = p;
   updateHpBars();
-  updateStaminaBar();
 });
-
-socket.on('attack_anim', ({ slot, type }) => {
-  attackFlash = { slot, type };
-  const duration = type === 'kick' ? 260 : type === 'hand' ? 200 : 220;
-  setTimeout(() => {
-    if (attackFlash && attackFlash.slot === slot) attackFlash = null;
-  }, duration);
+socket.on('attack_anim', function (data) {
+  attackFlashSlot = data.slot;
+  attackStartTime[data.slot] = performance.now();
+  playSwing();
+  setTimeout(function () { attackFlashSlot = null; }, 220);
 });
+socket.on('hit_landed', function (data) {
+  playClash();
+  setTimeout(playHit, 60);
+  shake = 10;
+  const p = Object.values(players).find(function (pl) { return pl.slot === data.targetSlot; });
+  if (p) spawnHitEffect(p, false);
+});
+socket.on('block_landed', function (data) {
+  playBlock();
+  shake = 4;
+  blockFlash[data.targetSlot] = performance.now();
+});
+socket.on('attack_denied', function () {
+  beep({ freq: 220, duration: 0.1, type: 'square', volume: 0.1 });
+});
+socket.on('knockout', function (data) {
+  playKO();
+  shake = 18;
+  const p = Object.values(players).find(function (pl) { return pl.slot === data.loserSlot; });
+  if (p) spawnHitEffect(p, true);
 
-socket.on('hit', ({ slot, part, critical }) => {
-  screenShake = critical ? 15 : 8;
-
-  const hitPlayer = Object.values(players).find(pl => pl.slot === slot);
-  if (hitPlayer) {
-    const scale = canvas.width / 800;
-    const pt = bodyPartPoint(hitPlayer, part, scale);
-
-    // кровь прямо на месте попадания (в том числе на лице, если part === 'head')
-    const bloodCount = critical ? 26 : (part === 'head' ? 18 : 14);
-    spawnBloodAt(pt.x, pt.y, bloodCount);
-    spawnSparks(pt.x, pt.y, -hitPlayer.facing);
-
-    // маркер на ринге, показывающий куда пришёлся удар
-    hitMarkers.push({ x: pt.x, y: pt.y, part, critical: !!critical, life: 42, maxLife: 42 });
-
-    if (critical) critFlash = 30;
+  const frames = history.slice(-40);
+  if (frames.length > 4) {
+    replay = { frames: frames, index: 0, winnerSlot: data.winnerSlot, loserSlot: data.loserSlot };
+  } else {
+    scheduleKoScreen(data.winnerSlot);
   }
 });
+socket.on('room_full', function () { statusEl.textContent = 'Комната уже занята'; });
+socket.on('opponent_left', function () { statusEl.textContent = 'Соперник вышел из боя'; });
 
-socket.on('attack_failed', () => {
-  const old = statusEl.textContent;
-  statusEl.textContent = 'Не хватает выносливости!';
-  setTimeout(() => {
-    if (statusEl.textContent === 'Не хватает выносливости!') statusEl.textContent = old === 'Не хватает выносливости!' ? '' : old;
-  }, 700);
+document.getElementById('rematch-btn').addEventListener('click', function () {
+  socket.emit('rematch');
 });
 
-socket.on('room_full', () => {
-  statusEl.textContent = 'Комната уже занята';
-});
-
-socket.on('opponent_left', () => {
-  statusEl.textContent = 'Соперник вышел из боя';
-});
-
-// Тексты для разных типов добивания
-const FINISHER_TEXT = {
-  ko_head: '🥊 Нокаут в голову!',
-  ko_legs: '🦵 Нокаут по ногам!',
-  surrender: '😵 Технический нокаут!',
-  body_break: '💥 Критический удар в корпус!',
-};
-
-socket.on('game_over', ({ winnerSlot, loserSlot, finisher, winnerWins }) => {
-  gameEnded = true;
-
-  const iAmWinner = winnerSlot === mySlot;
-  const resultText = iAmWinner ? '🏆 Победа!' : '💀 Поражение';
-  const finisherText = FINISHER_TEXT[finisher] || '';
-  statusEl.textContent = `${resultText}  ${finisherText}`;
-
-  if (iAmWinner && winsCountEl && typeof winnerWins === 'number') {
-    winsCountEl.textContent = winnerWins;
-  }
-
-  // яркий эффект добивания на месте проигравшего
-  const loser = Object.values(players).find(pl => pl.slot === loserSlot);
-  if (loser) {
-    const scale = canvas.width / 800;
-    screenShake = 18;
-    if (finisher === 'ko_head') {
-      const pt = bodyPartPoint(loser, 'head', scale);
-      spawnBloodAt(pt.x, pt.y, 40);
-      spawnSparks(pt.x, pt.y, loser.facing);
-    } else if (finisher === 'body_break') {
-      const pt = bodyPartPoint(loser, 'torso', scale);
-      spawnBloodAt(pt.x, pt.y, 45);
-      spawnSparks(pt.x, pt.y, loser.facing);
-      critFlash = 40;
-    } else if (finisher === 'ko_legs') {
-      const pt = bodyPartPoint(loser, 'legs', scale);
-      spawnBloodAt(pt.x, pt.y, 30);
-      spawnSparks(pt.x, pt.y, loser.facing);
-    } else {
-      const pt = bodyPartPoint(loser, 'torso', scale);
-      spawnSparks(pt.x, pt.y, loser.facing);
-    }
-  }
-
-  setTimeout(() => {
-    playBtn.textContent = 'ИГРАТЬ СНОВА';
-    menuOverlay.style.display = 'flex';
-  }, 1800);
-});
+function scheduleKoScreen(winnerSlot) {
+  setTimeout(function () {
+    koSub.textContent = winnerSlot === mySlot ? 'Ты победил нокаутом!' : 'Соперник победил нокаутом';
+    koScreen.classList.add('show');
+  }, 900);
+}
 
 function updateHpBars() {
-  Object.values(players).forEach(p => {
-    const els = hpBarEls[p.slot];
-    if (!els) return;
-    if (els.head) els.head.style.width = Math.max(0, p.hp.head) + '%';
-    if (els.torso) els.torso.style.width = Math.max(0, p.hp.torso) + '%';
-    if (els.legs) els.legs.style.width = Math.max(0, p.hp.legs) + '%';
+  Object.values(players).forEach(function (p) {
+    if (hpBars[p.slot]) hpBars[p.slot].style.width = p.hp + '%';
+    if (stBars[p.slot]) stBars[p.slot].style.width = p.stamina + '%';
   });
 }
 
-function updateStaminaBar() {
-  if (mySlot === null) return;
-  const me = Object.values(players).find(pl => pl.slot === mySlot);
-  if (me) staminaBar.style.width = Math.max(0, me.stamina) + '%';
+// ---------- ЭФФЕКТЫ ----------
+function spawnHitEffect(p, big) {
+  const scale = cssW / 800;
+  const px = p.x * scale;
+  const groundY = cssH * 0.82;
+  const count = settings.gore ? (big ? 26 : 16) : (big ? 12 : 8);
+  const color = settings.gore ? '#c8102e' : '#ffe066';
+  for (let i = 0; i < count; i++) {
+    particles.push({
+      x: px, y: groundY - 55,
+      vx: (Math.random() - 0.5) * (big ? 8 : 6), vy: -Math.random() * (big ? 7 : 5) - 1,
+      life: 1, color: color, size: settings.gore ? 3 + Math.random() * 3 : 2 + Math.random() * 2,
+      gravity: settings.gore ? 0.45 : 0.35,
+    });
+  }
+  for (let i = 0; i < (big ? 16 : 10); i++) {
+    const angle = Math.random() * Math.PI * 2;
+    sparks.push({
+      x: px, y: groundY - 55,
+      vx: Math.cos(angle) * (2 + Math.random() * 4),
+      vy: Math.sin(angle) * (2 + Math.random() * 4),
+      life: 1,
+    });
+  }
+  if (settings.gore) {
+    bloodPools.push({ x: px, y: groundY, r: 0, maxR: big ? 26 : 14, life: 1 });
+  }
 }
-
-// ---------- ФОН АРЕНЫ: ОКТАГОН ----------
-function drawBackground() {
-  const w = canvas.width, h = canvas.height;
-
-  // тёмный потолок арены
-  const top = ctx.createLinearGradient(0, 0, 0, h * 0.4);
-  top.addColorStop(0, '#0a0b10');
-  top.addColorStop(1, '#1a1c24');
-  ctx.fillStyle = top;
-  ctx.fillRect(0, 0, w, h * 0.4);
-
-  // прожекторы над рингом
-  [0.22, 0.5, 0.78].forEach(fx => {
-    const lx = w * fx, ly = h * 0.02;
-    const glow = ctx.createRadialGradient(lx, ly, 0, lx, ly, h * 0.45);
-    glow.addColorStop(0, 'rgba(255,255,255,0.16)');
-    glow.addColorStop(1, 'rgba(255,255,255,0)');
-    ctx.fillStyle = glow;
-    ctx.fillRect(0, 0, w, h * 0.6);
+function updateParticles() {
+  particles.forEach(function (pt) { pt.x += pt.vx; pt.y += pt.vy; pt.vy += pt.gravity || 0.35; pt.life -= 0.03; });
+  particles = particles.filter(function (pt) { return pt.life > 0; });
+  sparks.forEach(function (s) { s.x += s.vx; s.y += s.vy; s.life -= 0.06; });
+  sparks = sparks.filter(function (s) { return s.life > 0; });
+  bloodPools.forEach(function (b) { if (b.r < b.maxR) b.r += 0.6; b.life -= 0.003; });
+  bloodPools = bloodPools.filter(function (b) { return b.life > 0; });
+}
+function drawParticles() {
+  bloodPools.forEach(function (b) {
+    ctx.globalAlpha = Math.min(b.life, 0.6);
+    ctx.fillStyle = '#7a0d1a';
+    ctx.beginPath();
+    ctx.ellipse(b.x, b.y, b.r, b.r * 0.35, 0, 0, Math.PI * 2);
+    ctx.fill();
   });
-
-  // сетка клетки (октагон)
-  const fenceTop = h * 0.1, fenceBottom = h * 0.6;
-  ctx.strokeStyle = 'rgba(190,195,205,0.28)';
-  ctx.lineWidth = 1.5;
-  for (let x = 0; x <= w; x += 24) {
+  particles.forEach(function (pt) {
+    ctx.globalAlpha = Math.max(pt.life, 0);
+    ctx.fillStyle = pt.color;
     ctx.beginPath();
-    ctx.moveTo(x, fenceTop);
-    ctx.lineTo(x, fenceBottom);
-    ctx.stroke();
-  }
-  for (let y = fenceTop; y <= fenceBottom; y += 24) {
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(w, y);
-    ctx.stroke();
-  }
-  // затемнение клетки, чтобы бойцы читались на фоне
-  const fenceFade = ctx.createLinearGradient(0, fenceTop, 0, fenceBottom);
-  fenceFade.addColorStop(0, 'rgba(8,8,12,0.6)');
-  fenceFade.addColorStop(1, 'rgba(8,8,12,0.15)');
-  ctx.fillStyle = fenceFade;
-  ctx.fillRect(0, fenceTop, w, fenceBottom - fenceTop);
-
-  // верхний трос клетки
-  ctx.strokeStyle = 'rgba(220,220,230,0.5)';
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(0, fenceTop);
-  ctx.lineTo(w, fenceTop);
-  ctx.stroke();
-
-  // мат октагона
-  const mat = ctx.createLinearGradient(0, h * 0.58, 0, h);
-  mat.addColorStop(0, '#7a1f1f');
-  mat.addColorStop(0.5, '#551515');
-  mat.addColorStop(1, '#280a0a');
-  ctx.fillStyle = mat;
-  ctx.fillRect(0, h * 0.58, w, h * 0.42);
-
-  // белая кромка периметра мата
-  ctx.strokeStyle = 'rgba(255,255,255,0.55)';
-  ctx.lineWidth = 4;
-  ctx.beginPath();
-  ctx.moveTo(0, h * 0.6);
-  ctx.lineTo(w, h * 0.6);
-  ctx.stroke();
-
-  // надпись по центру мата
-  ctx.fillStyle = 'rgba(255,255,255,0.1)';
-  ctx.font = `bold ${Math.round(h * 0.05)}px sans-serif`;
-  ctx.textAlign = 'center';
-  ctx.fillText('OCTAGON', w / 2, h * 0.86);
-
-  const vignette = ctx.createRadialGradient(w / 2, h / 2, h * 0.3, w / 2, h / 2, h);
-  vignette.addColorStop(0, 'rgba(0,0,0,0)');
-  vignette.addColorStop(1, 'rgba(0,0,0,0.5)');
-  ctx.fillStyle = vignette;
-  ctx.fillRect(0, 0, w, h);
-}
-
-function drawFighter(p, scale) {
-  const x = p.x * scale;
-  const y = canvas.height - 90;
-  const isFlash = attackFlash && attackFlash.slot === p.slot;
-  const flashType = isFlash ? attackFlash.type : null;
-  const skin = p.slot === 0 ? '#c98a5a' : '#d9a878';
-  const shortsColor = p.slot === 0 ? '#2f6b3f' : '#7a2f2f';
-  const shortsShade = p.slot === 0 ? '#1f4a2b' : '#571f1f';
-  const gloveColor = p.slot === 0 ? '#1c1c1c' : '#c21e1e';
-  const legsHurt = p.hp.legs <= 40;
-
-  const isMoving = movingUntil[p.slot] && Date.now() < movingUntil[p.slot];
-  if (isMoving) {
-    walkPhase[p.slot] += legsHurt ? 0.14 : 0.22;
-  } else {
-    walkPhase[p.slot] *= 0.85;
-  }
-  const wp = walkPhase[p.slot];
-  const legSwing = Math.sin(wp) * 10;
-  const armSwing = Math.sin(wp + Math.PI) * 8;
-  const bob = Math.abs(Math.sin(wp)) * 2;
-  const torsoTilt = Math.sin(wp) * 2;
-
-  // тень
-  ctx.fillStyle = 'rgba(0,0,0,0.35)';
-  ctx.beginPath();
-  ctx.ellipse(x, y + 4, 22, 6, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  const groundY = y - bob;
-
-  // задняя нога
-  ctx.save();
-  ctx.translate(x - 5, groundY - 4);
-  ctx.rotate((-legSwing * Math.PI) / 180 * 0.6);
-  ctx.fillStyle = skin;
-  ctx.fillRect(-4.5, -22, 9, 22);
-  ctx.fillStyle = '#111';
-  ctx.fillRect(-5.5, -2, 11, 5);
-  ctx.restore();
-
-  // передняя нога (с ударом при пинке)
-  let kickAngle = 0;
-  if (flashType === 'kick') {
-    kickAngle = 55;
-  } else if (isMoving) {
-    kickAngle = -legSwing;
-  }
-  ctx.save();
-  ctx.translate(x + 7 * p.facing, groundY - 4);
-  ctx.rotate((kickAngle * p.facing * Math.PI) / 180);
-  ctx.fillStyle = legsHurt ? '#8a5a3a' : skin;
-  ctx.fillRect(-4.5, -22, 9, 22);
-  ctx.fillStyle = '#111';
-  ctx.fillRect(-5.5, -2, 11, 5);
-  ctx.restore();
-
-  // торс + шорты (лёгкий наклон при ходьбе / замахе)
-  const punchWindup = (flashType === 'sword' || flashType === 'hand') ? -6 : 0;
-  ctx.save();
-  ctx.translate(x, groundY - 42);
-  ctx.rotate(((torsoTilt + punchWindup) * p.facing * Math.PI) / 180);
-
-  const bodyGrad = ctx.createLinearGradient(-16, -22, 16, 20);
-  bodyGrad.addColorStop(0, skin);
-  bodyGrad.addColorStop(1, shortsShade);
-  ctx.fillStyle = bodyGrad;
-  ctx.fillRect(-15, -22, 30, 30);
-
-  ctx.strokeStyle = 'rgba(0,0,0,0.15)';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(0, -14); ctx.lineTo(0, 6);
-  ctx.moveTo(-8, -8); ctx.lineTo(8, -8);
-  ctx.moveTo(-8, 0); ctx.lineTo(8, 0);
-  ctx.stroke();
-
-  ctx.fillStyle = shortsColor;
-  ctx.fillRect(-16, 6, 32, 14);
-  ctx.fillStyle = 'rgba(255,255,255,0.5)';
-  ctx.fillRect(-16, 6, 32, 2);
-  ctx.restore();
-
-  // задняя рука
-  ctx.save();
-  ctx.translate(x - 18 * p.facing, groundY - 58);
-  ctx.rotate((armSwing * p.facing * Math.PI) / 180 * 0.7);
-  ctx.fillStyle = skin;
-  ctx.fillRect(0, 0, 6, 22);
-  ctx.fillStyle = gloveColor;
-  ctx.beginPath();
-  ctx.arc(3, 24, 6, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
-
-  // голова
-  ctx.save();
-  ctx.translate(x, groundY - 76);
-  ctx.rotate(((torsoTilt + punchWindup) * p.facing * Math.PI) / 180 * 0.5);
-  ctx.fillStyle = skin;
-  ctx.beginPath();
-  ctx.arc(0, 0, 14, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = shortsShade;
-  ctx.beginPath();
-  ctx.arc(0, -3, 14.5, Math.PI, 0);
-  ctx.fill();
-  ctx.fillStyle = '#1a1410';
-  const eyeShift = p.facing * 4;
-  ctx.beginPath();
-  ctx.arc(eyeShift - 3, 0, 1.6, 0, Math.PI * 2);
-  ctx.arc(eyeShift + 3, 0, 1.6, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
-
-  // ударная рука: "sword" = джеб в голову, "hand" = хук в торс
-  const isPunchHead = flashType === 'sword';
-  const isPunchBody = flashType === 'hand';
-  let armAngle = -armSwing * 0.7;
-  let armLen = 22;
-  let armY = groundY - 56;
-  if (isPunchHead) { armAngle = -20; armLen = 34; armY = groundY - 62; }
-  if (isPunchBody) { armAngle = -35; armLen = 30; armY = groundY - 46; }
-
-  ctx.save();
-  ctx.translate(x + 15 * p.facing, armY);
-  ctx.rotate((armAngle * p.facing * Math.PI) / 180);
-  ctx.fillStyle = skin;
-  ctx.fillRect(0, 0, p.facing * 6, armLen);
-  ctx.fillStyle = gloveColor;
-  ctx.beginPath();
-  ctx.arc(p.facing * 3, armLen, 7, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
-
-  // вспышка удара
-  if (flashType === 'sword') {
-    ctx.fillStyle = 'rgba(255,255,255,0.4)';
-    ctx.beginPath();
-    ctx.arc(x + 50 * p.facing, groundY - 62, 14, 0, Math.PI * 2);
+    ctx.arc(pt.x, pt.y, pt.size, 0, Math.PI * 2);
     ctx.fill();
-  } else if (flashType === 'kick') {
-    ctx.fillStyle = 'rgba(255,160,80,0.4)';
-    ctx.beginPath();
-    ctx.arc(x + 40 * p.facing, groundY - 10, 14, 0, Math.PI * 2);
-    ctx.fill();
-  } else if (flashType === 'hand') {
-    ctx.fillStyle = 'rgba(255,255,255,0.35)';
-    ctx.beginPath();
-    ctx.arc(x + 45 * p.facing, groundY - 40, 12, 0, Math.PI * 2);
-    ctx.fill();
-  }
-}
-
-function draw() {
-  const w = canvas.width, h = canvas.height;
-
-  ctx.save();
-  if (screenShake > 0) {
-    const dx = (Math.random() - 0.5) * screenShake;
-    const dy = (Math.random() - 0.5) * screenShake;
-    ctx.translate(dx, dy);
-    screenShake *= 0.85;
-    if (screenShake < 0.3) screenShake = 0;
-  }
-
-  ctx.clearRect(-20, -20, w + 40, h + 40);
-  drawBackground();
-
-  const scale = w / 800;
-  Object.values(players).forEach((p) => drawFighter(p, scale));
-
-  sparkEffects.forEach(s => {
-    const alpha = Math.max(s.life / s.maxLife, 0);
-    ctx.strokeStyle = `rgba(255,224,120,${alpha})`;
+  });
+  sparks.forEach(function (s) {
+    ctx.globalAlpha = Math.max(s.life, 0);
+    ctx.strokeStyle = '#fff6c8';
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(s.x, s.y);
     ctx.lineTo(s.x - s.vx * 1.5, s.y - s.vy * 1.5);
     ctx.stroke();
-    s.x += s.vx;
-    s.y += s.vy;
-    s.vy += 0.15;
-    s.life--;
   });
-  sparkEffects = sparkEffects.filter(s => s.life > 0);
+  ctx.globalAlpha = 1;
+}
 
-  bloodEffects.forEach(b => {
-    const alpha = Math.max(b.life / b.maxLife, 0);
-    ctx.fillStyle = `rgba(161,29,29,${alpha})`;
-    ctx.beginPath();
-    ctx.arc(b.x, b.y, b.size, 0, Math.PI * 2);
-    ctx.fill();
-    b.x += b.vx;
-    b.y += b.vy;
-    b.vy += 0.22;
-    b.life--;
-  });
-  bloodEffects = bloodEffects.filter(b => b.life > 0);
+// перчатка: манжета + округлый кулак + большой палец + блик
+function drawGlove(cx, cy, angle, teamColor) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(angle || 0);
 
-  // маркеры попадания на теле бойца (показывают куда пришёлся удар)
-  hitMarkers.forEach(m => {
-    const t = 1 - m.life / m.maxLife;
-    const alpha = Math.max(m.life / m.maxLife, 0);
-    ctx.strokeStyle = m.critical ? `rgba(255,60,60,${alpha})` : `rgba(255,255,255,${alpha})`;
-    ctx.lineWidth = 2.5;
+  // манжета
+  ctx.fillStyle = teamColor;
+  ctx.fillRect(-4, -9, 8, 6);
+  ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(-4, -9, 8, 6);
+
+  // основной кулак (градиент для объёма)
+  const gGrad = ctx.createRadialGradient(-2, -2, 1, 0, 0, 8);
+  gGrad.addColorStop(0, '#ff6b6b');
+  gGrad.addColorStop(0.6, '#d81f2e');
+  gGrad.addColorStop(1, '#8c0f1a');
+  ctx.fillStyle = gGrad;
+  ctx.beginPath();
+  ctx.ellipse(0, 1, 7, 8, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // большой палец
+  ctx.fillStyle = '#c8182a';
+  ctx.beginPath();
+  ctx.ellipse(-6, -1, 3, 4, 0.3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+  ctx.lineWidth = 0.8;
+  ctx.stroke();
+
+  // шов/линии на костяшках
+  ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+  ctx.lineWidth = 0.8;
+  ctx.beginPath();
+  ctx.moveTo(-4, -3); ctx.lineTo(4, -3);
+  ctx.moveTo(-4, 1); ctx.lineTo(4, 1);
+  ctx.stroke();
+
+  // блик
+  ctx.fillStyle = 'rgba(255,255,255,0.35)';
+  ctx.beginPath();
+  ctx.ellipse(-2, -3, 2, 1.4, -0.4, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
+function drawArenaBackground(groundY) {
+  const g = ctx.createLinearGradient(0, 0, 0, cssH);
+  g.addColorStop(0, '#1c2b3a');
+  g.addColorStop(0.55, '#2c3b2c');
+  g.addColorStop(0.55, '#4a3626');
+  g.addColorStop(1, '#26160c');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, cssW, cssH);
+
+  const light = ctx.createRadialGradient(cssW / 2, 0, 20, cssW / 2, groundY, cssW * 0.7);
+  light.addColorStop(0, 'rgba(255,255,255,0.18)');
+  light.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = light;
+  ctx.fillRect(0, 0, cssW, cssH);
+
+  ctx.save();
+  ctx.strokeStyle = 'rgba(200,200,200,0.25)';
+  ctx.lineWidth = 2;
+  const cx = cssW / 2;
+  const cy = groundY - cssH * 0.16;
+  const r = cssW * 0.62;
+  ctx.beginPath();
+  for (let i = 0; i < 8; i++) {
+    const a = (Math.PI / 4) * i - Math.PI / 8;
+    const px = cx + Math.cos(a) * r;
+    const py = cy + Math.sin(a) * r * 0.32;
+    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(180,180,180,0.12)';
+  ctx.lineWidth = 1;
+  for (let i = -6; i <= 6; i++) {
     ctx.beginPath();
-    ctx.arc(m.x, m.y, 10 + t * 22, 0, Math.PI * 2);
+    ctx.moveTo(cx + i * (cssW / 14), cy - cssH * 0.05);
+    ctx.lineTo(cx + i * (cssW / 14), groundY);
     ctx.stroke();
-    ctx.fillStyle = m.critical ? `rgba(255,90,90,${alpha})` : `rgba(255,255,255,${alpha})`;
-    ctx.font = 'bold 11px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText(PART_LABEL[m.part] || '', m.x, m.y - 16 - t * 20);
-    m.life--;
-  });
-  hitMarkers = hitMarkers.filter(m => m.life > 0);
+  }
+  ctx.restore();
 
-  // вспышка критического удара
-  if (critFlash > 0) {
-    const alpha = Math.min(critFlash / 30, 1);
-    ctx.fillStyle = `rgba(255,0,0,${alpha * 0.22})`;
-    ctx.fillRect(-20, -20, w + 40, h + 40);
-    ctx.fillStyle = `rgba(255,225,70,${alpha})`;
-    ctx.font = `bold ${Math.round(h * 0.05)}px sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.fillText('КРИТИЧЕСКИЙ УДАР!', w / 2, h * 0.3);
-    critFlash--;
+  const floor = ctx.createLinearGradient(0, groundY, 0, cssH);
+  floor.addColorStop(0, 'rgba(0,0,0,0.5)');
+  floor.addColorStop(1, 'rgba(0,0,0,0.1)');
+  ctx.fillStyle = floor;
+  ctx.fillRect(0, groundY, cssW, cssH - groundY);
+
+  ctx.strokeStyle = 'rgba(255,220,150,0.4)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(0, groundY);
+  ctx.lineTo(cssW, groundY);
+  ctx.stroke();
+}
+
+// ---------- РИСОВАНИЕ ОДНОГО БОЙЦА (более анатомичный силуэт) ----------
+function drawFighter(p, groundY, scale, isBlocking, isAttacking, swingT) {
+  const x = p.x * scale;
+  const y = groundY;
+  const color = p.slot === 0 ? '#3f8a5c' : '#a13f3f';
+  const colorDark = p.slot === 0 ? '#255c3a' : '#6e2323';
+  const skin = '#e8b088';
+  const skinDark = '#b87d54';
+
+  if (fallProgress[p.slot] === undefined) fallProgress[p.slot] = 0;
+  if (p.knockedOut && fallProgress[p.slot] < 1) {
+    fallProgress[p.slot] = Math.min(1, fallProgress[p.slot] + 0.045);
+  }
+  const fallT = fallProgress[p.slot];
+  const fallAngle = fallT * (Math.PI / 2) * p.facing * -1;
+  const fallLift = Math.sin(fallT * Math.PI) * -8;
+
+  const last = prevX[p.slot];
+  const moving = !p.knockedOut && last !== undefined && Math.abs(x - last) > 0.3;
+  prevX[p.slot] = x;
+  if (!walkPhase[p.slot]) walkPhase[p.slot] = 0;
+  if (moving) {
+    walkPhase[p.slot] += 0.35;
+    if (Math.floor(walkPhase[p.slot]) % 6 === 0) playStep();
+  }
+  const legSwing = moving ? Math.sin(walkPhase[p.slot]) * 7 : 0;
+  const bob = moving ? Math.abs(Math.sin(walkPhase[p.slot])) * 3 : 0;
+  const blockGlow = blockFlash[p.slot] && performance.now() - blockFlash[p.slot] < 200;
+
+  ctx.save();
+  ctx.translate(x, y + fallLift);
+  ctx.rotate(fallAngle);
+  ctx.translate(-x, -y);
+
+  // тень
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  ctx.beginPath();
+  ctx.ellipse(x, y + 3, 23, 6, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // ноги (бёдра шире, голени уже, с разделением на колене)
+  const legGrad = ctx.createLinearGradient(x - 14, y - 28, x + 14, y);
+  legGrad.addColorStop(0, '#241a12');
+  legGrad.addColorStop(1, '#3a2a1c');
+  ctx.fillStyle = legGrad;
+  ctx.fillRect(x - 13 + legSwing * 0.3, y - 30 - bob, 10, 16);
+  ctx.fillRect(x - 12 + legSwing * 0.5, y - 15 - bob, 8, 15);
+  ctx.fillRect(x + 3 - legSwing * 0.3, y - 30 - bob, 10, 16);
+  ctx.fillRect(x + 4 - legSwing * 0.5, y - 15 - bob, 8, 15);
+
+  // торс: трапеция (плечи шире талии) с мышечной светотенью
+  const shT = y - 66 - bob, shB = y - 26 - bob;
+  ctx.beginPath();
+  ctx.moveTo(x - 17, shT);
+  ctx.lineTo(x + 17, shT);
+  ctx.lineTo(x + 11, shB);
+  ctx.lineTo(x - 11, shB);
+  ctx.closePath();
+  const bodyGrad = ctx.createLinearGradient(x - 17, shT, x + 17, shB);
+  bodyGrad.addColorStop(0, isBlocking ? '#5a80b8' : color);
+  bodyGrad.addColorStop(1, isBlocking ? '#25406e' : colorDark);
+  ctx.fillStyle = bodyGrad;
+  ctx.fill();
+  ctx.strokeStyle = blockGlow ? 'rgba(120,180,255,0.9)' : 'rgba(0,0,0,0.3)';
+  ctx.lineWidth = blockGlow ? 3 : 1.3;
+  ctx.stroke();
+  // линия пресса
+  ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x, shT + 6);
+  ctx.lineTo(x, shB - 2);
+  ctx.stroke();
+
+  // шорты
+  ctx.fillStyle = colorDark;
+  ctx.fillRect(x - 13, shB - 2, 26, 10);
+
+  // свободная рука (в перчатке)
+  ctx.fillStyle = skinDark;
+  ctx.fillRect(x - p.facing * 21 - 3, y - 63 - bob, 6, 12);
+  ctx.fillStyle = colorDark;
+  ctx.fillRect(x - p.facing * 21 - 3, y - 52 - bob, 6, 12);
+  drawGlove(x - p.facing * 21, y - 38 - bob, 0, colorDark);
+
+  // шея + голова (более круглая, с волосами и челюстью)
+  ctx.fillStyle = skinDark;
+  ctx.fillRect(x - 4, y - 70 - bob, 8, 6);
+  const headGrad = ctx.createRadialGradient(x - 5, y - 84 - bob, 2, x, y - 79 - bob, 14);
+  headGrad.addColorStop(0, skin);
+  headGrad.addColorStop(1, skinDark);
+  ctx.fillStyle = headGrad;
+  ctx.beginPath();
+  ctx.arc(x, y - 80 - bob, 13, 0, Math.PI * 2);
+  ctx.fill();
+  // волосы
+  ctx.fillStyle = '#2a1c12';
+  ctx.beginPath();
+  ctx.arc(x, y - 87 - bob, 13, Math.PI, 0);
+  ctx.fill();
+
+  ctx.fillStyle = '#1a1410';
+  if (p.knockedOut) {
+    ctx.beginPath();
+    ctx.moveTo(x - 6, y - 83 - bob); ctx.lineTo(x - 2, y - 79 - bob);
+    ctx.moveTo(x - 2, y - 83 - bob); ctx.lineTo(x - 6, y - 79 - bob);
+    ctx.moveTo(x + 2, y - 83 - bob); ctx.lineTo(x + 6, y - 79 - bob);
+    ctx.moveTo(x + 6, y - 83 - bob); ctx.lineTo(x + 2, y - 79 - bob);
+    ctx.strokeStyle = '#1a1410';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  } else {
+    const eyeShift = p.facing * 4;
+    ctx.beginPath();
+    ctx.arc(x + eyeShift - 3, y - 81 - bob, 1.6, 0, Math.PI * 2);
+    ctx.arc(x + eyeShift + 3, y - 81 - bob, 1.6, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  if (!p.knockedOut) {
+    const shoulderX = x + p.facing * 15;
+    const shoulderY = y - 63 - bob;
+
+    // манера покоя: кулак у подбородка (гард), при ударе рука распрямляется вперёд
+    const guardAngle = isBlocking
+      ? (p.facing === 1 ? -1.35 : Math.PI + 1.35)
+      : (p.facing === 1 ? -0.95 : Math.PI + 0.95);
+    const punchAngle = p.facing === 1 ? -0.08 : Math.PI + 0.08;
+    const extension = isAttacking ? Math.sin(swingT * Math.PI) : 0;
+    const armAngle = guardAngle + (punchAngle - guardAngle) * extension;
+
+    const upperLen = 11;
+    const forearmBase = 11;
+    const forearmExtra = 20 * extension;
+    const forearmLen = forearmBase + forearmExtra;
+
+    ctx.save();
+    ctx.translate(shoulderX, shoulderY);
+    ctx.rotate(armAngle);
+
+    // плечевая мышца
+    const armGrad = ctx.createLinearGradient(-4, 0, 4, upperLen);
+    armGrad.addColorStop(0, color);
+    armGrad.addColorStop(1, colorDark);
+    ctx.fillStyle = armGrad;
+    ctx.beginPath();
+    ctx.ellipse(0, upperLen / 2, 5, upperLen / 2 + 1, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // предплечье (вытягивается при ударе)
+    ctx.translate(0, upperLen);
+    ctx.fillStyle = skinDark;
+    ctx.fillRect(-3.5, 0, 7, forearmLen);
+    ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(-3.5, 0, 7, forearmLen);
+
+    // смаз-полоса в момент выброса руки
+    if (isAttacking && extension > 0.15) {
+      ctx.strokeStyle = 'rgba(255,255,255,' + (0.4 * extension) + ')';
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.moveTo(0, forearmLen * 0.2);
+      ctx.lineTo(0, forearmLen * 0.85);
+      ctx.stroke();
+    }
+
+    drawGlove(0, forearmLen, 0, colorDark);
+    ctx.restore();
+  }
+
+  ctx.restore();
+}
+
+// ---------- ОСНОВНОЙ ЦИКЛ ----------
+function pushHistory() {
+  const snap = { p: {} };
+  Object.keys(players).forEach(function (id) {
+    const p = players[id];
+    snap.p[p.slot] = { x: p.x, facing: p.facing, blocking: p.blocking };
+  });
+  snap.atkSlot = attackFlashSlot;
+  snap.atkT = attackFlashSlot !== null && attackStartTime[attackFlashSlot]
+    ? Math.min((performance.now() - attackStartTime[attackFlashSlot]) / 220, 1)
+    : 0;
+  history.push(snap);
+  if (history.length > HISTORY_MAX) history.shift();
+}
+
+function drawReplay(groundY, scale) {
+  const frame = replay.frames[Math.floor(replay.index)];
+  if (!frame) { replay = null; scheduleKoScreen(replay ? replay.winnerSlot : mySlot); return; }
+
+  const p0 = frame.p[0], p1 = frame.p[1];
+  const midX = ((p0 ? p0.x : 0) + (p1 ? p1.x : 0)) / 2 * scale;
+
+  ctx.save();
+  const zoom = 1.6;
+  ctx.translate(cssW / 2, cssH * 0.55);
+  ctx.scale(zoom, zoom);
+  ctx.translate(-midX, -cssH * 0.55);
+
+  drawArenaBackground(groundY);
+  [p0, p1].forEach(function (pd, slot) {
+    if (!pd) return;
+    const isAtk = frame.atkSlot === slot;
+    drawFighter({ x: pd.x, facing: pd.facing, slot: slot, hp: 50, stamina: 50, blocking: pd.blocking, knockedOut: false },
+      groundY, scale, pd.blocking, isAtk, frame.atkT);
+  });
+  ctx.restore();
+
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  ctx.fillRect(0, 0, cssW, cssH);
+  ctx.fillStyle = '#ff3b3b';
+  ctx.font = 'bold 22px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.shadowColor = '#000';
+  ctx.shadowBlur = 8;
+  ctx.fillText('⏪ ПОВТОР', cssW / 2, 40);
+  ctx.shadowBlur = 0;
+
+  replay.index += 0.45;
+  if (replay.index >= replay.frames.length) {
+    const winnerSlot = replay.winnerSlot;
+    replay = null;
+    scheduleKoScreen(winnerSlot);
+  }
+}
+
+function draw() {
+  ctx.save();
+  if (shake > 0) {
+    ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
+    shake *= 0.85;
+    if (shake < 0.5) shake = 0;
+  }
+
+  ctx.clearRect(-20, -20, cssW + 40, cssH + 40);
+  const scale = cssW / 800;
+  const groundY = cssH * 0.82;
+
+  if (replay) {
+    drawReplay(groundY, scale);
+  } else {
+    drawArenaBackground(groundY);
+    pushHistory();
+    Object.values(players).forEach(function (p) {
+      const isAttacking = attackFlashSlot === p.slot;
+      let swingT = 0;
+      if (isAttacking && attackStartTime[p.slot]) {
+        swingT = Math.min((performance.now() - attackStartTime[p.slot]) / 220, 1);
+      }
+      drawFighter(p, groundY, scale, p.blocking, isAttacking, swingT);
+    });
+    updateParticles();
+    drawParticles();
   }
 
   ctx.restore();
@@ -559,6 +651,7 @@ function draw() {
 }
 draw();
 
+// ---------- ДЖОЙСТИК ----------
 const zone = document.getElementById('joystick-zone');
 const knob = document.getElementById('joystick-knob');
 let dragging = false;
@@ -566,27 +659,19 @@ let moveInterval = null;
 let currentDir = 0;
 
 function setKnob(dx) {
-  const max = 45;
+  const max = 32;
   const clampedX = Math.max(-max, Math.min(max, dx));
-  knob.style.left = 51 + clampedX + 'px';
-  knob.style.top = '51px';
+  knob.style.left = 33 + clampedX + 'px';
+  knob.style.top = '33px';
 }
-
 function startMoveLoop() {
   if (moveInterval) return;
-  moveInterval = setInterval(() => {
+  moveInterval = setInterval(function () {
     if (currentDir !== 0) socket.emit('move', { dir: currentDir });
-  }, 50);
+  }, 40);
 }
-function stopMoveLoop() {
-  clearInterval(moveInterval);
-  moveInterval = null;
-}
-
-function handleStart() {
-  dragging = true;
-  startMoveLoop();
-}
+function stopMoveLoop() { clearInterval(moveInterval); moveInterval = null; }
+function handleStart() { ensureAudio(); dragging = true; startMoveLoop(); }
 function handleMove(e) {
   if (!dragging) return;
   const touch = e.touches ? e.touches[0] : e;
@@ -595,12 +680,7 @@ function handleMove(e) {
   setKnob(dx);
   currentDir = dx > 15 ? 1 : dx < -15 ? -1 : 0;
 }
-function handleEnd() {
-  dragging = false;
-  currentDir = 0;
-  knob.style.left = '51px';
-  stopMoveLoop();
-}
+function handleEnd() { dragging = false; currentDir = 0; knob.style.left = '33px'; stopMoveLoop(); }
 
 zone.addEventListener('touchstart', handleStart);
 zone.addEventListener('touchmove', handleMove);
@@ -609,31 +689,30 @@ zone.addEventListener('mousedown', handleStart);
 window.addEventListener('mousemove', handleMove);
 window.addEventListener('mouseup', handleEnd);
 
-const attackBtn = document.getElementById('attack-btn'); // ГОЛОВА (джеб)
-const kickBtn = document.getElementById('kick-btn');     // НОГИ (пинок)
-const handBtn = document.getElementById('hand-btn');     // ТОРС (хук, может стать критическим)
+// ---------- БЛОК ----------
+const blockBtn = document.getElementById('block-btn');
+function blockStart(e) {
+  e.preventDefault();
+  ensureAudio();
+  blockBtn.classList.add('active');
+  socket.emit('block_start');
+}
+function blockEnd(e) {
+  if (e) e.preventDefault();
+  blockBtn.classList.remove('active');
+  socket.emit('block_end');
+}
+blockBtn.addEventListener('touchstart', blockStart);
+blockBtn.addEventListener('touchend', blockEnd);
+blockBtn.addEventListener('mousedown', blockStart);
+blockBtn.addEventListener('mouseup', blockEnd);
 
-function doSwordAttack(e) {
+// ---------- УДАР ----------
+const attackBtn = document.getElementById('attack-btn');
+function doAttack(e) {
   e.preventDefault();
-  if (gameEnded) return;
-  socket.emit('attack', { type: 'sword' });
+  ensureAudio();
+  socket.emit('attack');
 }
-function doKickAttack(e) {
-  e.preventDefault();
-  if (gameEnded) return;
-  socket.emit('attack', { type: 'kick' });
-}
-function doHandAttack(e) {
-  e.preventDefault();
-  if (gameEnded) return;
-  socket.emit('attack', { type: 'hand' });
-}
-
-attackBtn.addEventListener('touchstart', doSwordAttack);
-attackBtn.addEventListener('mousedown', doSwordAttack);
-kickBtn.addEventListener('touchstart', doKickAttack);
-kickBtn.addEventListener('mousedown', doKickAttack);
-if (handBtn) {
-  handBtn.addEventListener('touchstart', doHandAttack);
-  handBtn.addEventListener('mousedown', doHandAttack);
-}
+attackBtn.addEventListener('touchstart', doAttack);
+attackBtn.addEventListener('mousedown', doAttack);
