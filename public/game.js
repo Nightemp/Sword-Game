@@ -1,3 +1,4 @@
+cat > /mnt/user-data/outputs/game.js << 'GAMEEOF'
 const tg = window.Telegram?.WebApp;
 if (tg) { tg.ready(); tg.expand(); }
 
@@ -37,6 +38,9 @@ const hpBars = {
   },
 };
 const staminaBar = document.getElementById('stamina-bar');
+const koOverlay = document.getElementById('ko-overlay');
+const koText = document.getElementById('ko-text');
+const koSub = document.getElementById('ko-sub');
 
 let mySlot = null;
 let players = {};
@@ -48,6 +52,9 @@ const walkPhase = {};
 let particles = [];
 let sparks = [];
 let shake = 0;
+let finished = false;
+let koSlot = null;
+let fallStart = 0;
 
 function hideMenu(e) {
   if (e) e.preventDefault();
@@ -75,6 +82,9 @@ socket.on('opponent_joined', function (data) { players = data.players; });
 socket.on('start_game', function (data) {
   players = data.players;
   statusEl.textContent = '';
+  finished = false;
+  koSlot = null;
+  if (koOverlay) koOverlay.classList.remove('show');
 });
 socket.on('state_update', function (p) {
   players = p;
@@ -84,7 +94,7 @@ socket.on('attack_anim', function (data) {
   attackFlashSlot = data.slot;
   attackTarget[data.slot] = data.target;
   attackStartTime[data.slot] = performance.now();
-  setTimeout(function () { attackFlashSlot = null; }, 220);
+  setTimeout(function () { attackFlashSlot = null; }, data.target === 'power_kick' || data.target === 'power_punch' ? 320 : 220);
 });
 socket.on('hit_landed', function (data) {
   shake = data.part === 'legs' ? 12 : 8;
@@ -101,7 +111,26 @@ socket.on('too_tired', function () {
 socket.on('room_full', function () { statusEl.textContent = 'Комната уже занята'; });
 socket.on('opponent_left', function () { statusEl.textContent = 'Соперник вышел из боя'; });
 socket.on('game_over', function (data) {
-  statusEl.textContent = data.winnerSlot === mySlot ? '🏆 Победа!' : '💀 Поражение';
+  finished = true;
+  koSlot = data.winnerSlot === 0 ? 1 : 0;
+  fallStart = performance.now();
+  shake = 22;
+
+  let title = '🥊 НОКАУТ!';
+  if (data.reason === 'legs_broken') title = '🦵 ТЕХНИЧЕСКИЙ НОКАУТ';
+  else if (data.reason === 'blood') title = '🩸 ОСТАНОВКА БОЯ';
+
+  const won = data.winnerSlot === mySlot;
+  let sub;
+  if (data.reason === 'legs_broken') sub = won ? 'Ты сломал сопернику ногу!' : 'Соперник сломал тебе ногу';
+  else if (data.reason === 'blood') sub = won ? 'Решение судей в твою пользу' : 'Решение судей не в твою пользу';
+  else sub = won ? 'Ты победил нокаутом!' : 'Соперник победил нокаутом';
+
+  if (koText) koText.textContent = title;
+  if (koSub) koSub.textContent = sub;
+  setTimeout(function () {
+    if (koOverlay) koOverlay.classList.add('show');
+  }, 750);
 });
 
 function updateHpBars() {
@@ -262,12 +291,34 @@ function drawFighter(p, groundY, scale, isAttacking, swingT, target) {
   const bob = moving ? Math.abs(Math.sin(walkPhase[p.slot])) * 3 : 0;
   const lean = moving ? p.facing * 1.5 : 0;
 
-  const isKick = isAttacking && target === 'legs';
+  const isNormalKick = isAttacking && target === 'legs';
+  const isPowerKick = isAttacking && target === 'power_kick';
+  const isPunchType = isAttacking && (target === 'head' || target === 'torso' || target === 'power_punch');
+  const isPowerPunch = target === 'power_punch';
+
+  let fallAngle = 0, fallLift = 0;
+  if (koSlot === p.slot) {
+    const fallT = Math.min(1, (performance.now() - fallStart) / 650);
+    fallAngle = fallT * (Math.PI / 2) * p.facing * -1;
+    fallLift = Math.sin(fallT * Math.PI) * -10;
+  }
+  let spinAngle = 0;
+  if (isPowerKick) {
+    spinAngle = Math.sin(swingT * Math.PI) * Math.PI * 1.4 * p.facing;
+  }
 
   ctx.save();
-  ctx.translate(x, y);
-  ctx.rotate(lean * 0.02);
+  ctx.translate(x, y + fallLift);
+  ctx.rotate(lean * 0.02 + fallAngle + spinAngle);
   ctx.translate(-x, -y);
+
+  if (isPowerKick) {
+    ctx.strokeStyle = 'rgba(210,150,255,' + (0.5 * (1 - swingT)) + ')';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(x, y - 45, 34, 0, Math.PI * 2);
+    ctx.stroke();
+  }
 
   // тень
   ctx.fillStyle = 'rgba(0,0,0,0.4)';
@@ -282,14 +333,15 @@ function drawFighter(p, groundY, scale, isAttacking, swingT, target) {
   ctx.fillStyle = legGrad;
   ctx.fillRect(x - 13 - p.facing * 2 - legSwing * 0.3, y - 30 - bob, 10, 30);
 
-  // передняя нога — обычная ходьба, либо удар ногой
-  if (isKick) {
+  // передняя нога
+  if (isNormalKick || isPowerKick) {
     const kickExt = Math.sin(swingT * Math.PI);
+    const reach = isPowerKick ? 16 : 10;
     ctx.save();
     ctx.translate(x + p.facing * 6, y - 20 - bob);
-    ctx.rotate(p.facing * (0.3 + kickExt * 1.1));
+    ctx.rotate(p.facing * (0.3 + kickExt * (isPowerKick ? 1.5 : 1.1)));
     ctx.fillStyle = legGrad;
-    ctx.fillRect(-6, -10, 12, 24 + kickExt * 10);
+    ctx.fillRect(-6, -10, 12, 24 + kickExt * reach);
     ctx.restore();
   } else {
     ctx.fillStyle = legGrad;
@@ -316,7 +368,7 @@ function drawFighter(p, groundY, scale, isAttacking, swingT, target) {
   ctx.fillStyle = colorDark;
   ctx.fillRect(x - 13, shB - 2, 26, 10);
 
-  // задняя рука (противофаза шагу)
+  // задняя рука
   ctx.fillStyle = skinDark;
   ctx.fillRect(x - p.facing * 21 - 3 + armCounterSwing * 0.2, y - 63 - bob, 6, 12);
   ctx.fillStyle = colorDark;
@@ -349,14 +401,15 @@ function drawFighter(p, groundY, scale, isAttacking, swingT, target) {
   const shoulderX = x + p.facing * 15;
   const shoulderY = y - 63 - bob;
   const guardAngle = p.facing === 1 ? -0.95 : Math.PI + 0.95;
-  const punchAngle = p.facing === 1 ? -0.08 : Math.PI + 0.08;
-  const isPunch = isAttacking && !isKick;
-  const extension = isPunch ? Math.sin(swingT * Math.PI) : 0;
-  const armAngle = guardAngle + (punchAngle - guardAngle) * extension;
-  const aimLift = isPunch && target === 'head' ? -6 * extension : 0;
+  const punchAngleNormal = p.facing === 1 ? -0.08 : Math.PI + 0.08;
+  const punchAngleWide = p.facing === 1 ? 0.6 : Math.PI - 0.6;
+  const punchAngleTarget = isPowerPunch ? punchAngleWide : punchAngleNormal;
+  const extension = isPunchType ? Math.sin(swingT * Math.PI) : 0;
+  const armAngle = guardAngle + (punchAngleTarget - guardAngle) * extension;
+  const aimLift = isPunchType && (target === 'head' || target === 'power_punch') ? -6 * extension : 0;
 
   const upperLen = 11;
-  const forearmLen = 11 + 20 * extension;
+  const forearmLen = 11 + (isPowerPunch ? 30 : 20) * extension;
 
   ctx.save();
   ctx.translate(shoulderX, shoulderY + aimLift);
@@ -374,12 +427,14 @@ function drawFighter(p, groundY, scale, isAttacking, swingT, target) {
   ctx.fillStyle = skinDark;
   ctx.fillRect(-3.5, 0, 7, forearmLen);
 
-  if (isPunch && extension > 0.15) {
-    ctx.strokeStyle = 'rgba(255,255,255,' + (0.4 * extension) + ')';
-    ctx.lineWidth = 5;
+  if (isPunchType && extension > 0.15) {
+    ctx.strokeStyle = isPowerPunch
+      ? 'rgba(255,210,90,' + (0.55 * extension) + ')'
+      : 'rgba(255,255,255,' + (0.4 * extension) + ')';
+    ctx.lineWidth = isPowerPunch ? 7 : 5;
     ctx.beginPath();
-    ctx.moveTo(0, forearmLen * 0.2);
-    ctx.lineTo(0, forearmLen * 0.85);
+    ctx.moveTo(0, forearmLen * 0.15);
+    ctx.lineTo(0, forearmLen * 0.9);
     ctx.stroke();
   }
 
@@ -406,7 +461,8 @@ function draw() {
     const isAttacking = attackFlashSlot === p.slot;
     let swingT = 0;
     if (isAttacking && attackStartTime[p.slot]) {
-      swingT = Math.min((performance.now() - attackStartTime[p.slot]) / 220, 1);
+      const dur = attackTarget[p.slot] === 'power_kick' || attackTarget[p.slot] === 'power_punch' ? 320 : 220;
+      swingT = Math.min((performance.now() - attackStartTime[p.slot]) / dur, 1);
     }
     drawFighter(p, groundY, scale, isAttacking, swingT, attackTarget[p.slot]);
   });
@@ -435,7 +491,7 @@ function setKnob(dx) {
 function startMoveLoop() {
   if (moveInterval) return;
   moveInterval = setInterval(function () {
-    if (currentDir !== 0) socket.emit('move', { dir: currentDir });
+    if (!finished && currentDir !== 0) socket.emit('move', { dir: currentDir });
   }, 40);
 }
 function stopMoveLoop() { clearInterval(moveInterval); moveInterval = null; }
@@ -463,6 +519,7 @@ function bindAttack(id, target) {
   if (!btn) return;
   function fire(e) {
     e.preventDefault();
+    if (finished) return;
     socket.emit('attack', { target: target });
   }
   btn.addEventListener('touchstart', fire, { passive: false });
@@ -471,3 +528,7 @@ function bindAttack(id, target) {
 bindAttack('attack-btn', 'head');
 bindAttack('hand-btn', 'torso');
 bindAttack('kick-btn', 'legs');
+bindAttack('power-punch-btn', 'power_punch');
+bindAttack('power-kick-btn', 'power_kick');
+GAMEEOF
+echo saved game.js
