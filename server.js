@@ -1,3 +1,4 @@
+cat > /mnt/user-data/outputs/server.js << 'SRVEOF'
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -23,15 +24,19 @@ const ARENA_WIDTH = 800;
 const rooms = new Map();
 let totalGamesPlayed = 0;
 
-const RANGES = { head: 100, torso: 85, legs: 65 };
-const COSTS = { head: 12, torso: 18, legs: 24 };
-const DAMAGE = { head: 10, torso: 14, legs: 20 };
-const COOLDOWN = { head: 250, torso: 350, legs: 500 };
+const MOVES = {
+  head:        { range: 100, cost: 12, dmg: 10, cooldown: 250, part: 'head',  blood: 8  },
+  torso:       { range: 85,  cost: 18, dmg: 14, cooldown: 350, part: 'torso', blood: 8  },
+  legs:        { range: 65,  cost: 24, dmg: 20, cooldown: 500, part: 'legs',  blood: 8  },
+  power_punch: { range: 95,  cost: 40, dmg: 26, cooldown: 700, part: 'head',  blood: 16 },
+  power_kick:  { range: 80,  cost: 45, dmg: 32, cooldown: 900, part: 'head',  blood: 18 },
+};
 const TORSO_CRIT_CHANCE = 0.15;
 const TORSO_CRIT_BONUS = 10;
 const STAMINA_REGEN = 4;
 const STAMINA_REFUND_ON_HIT = 6;
 const REGEN_INTERVAL = 200;
+const BLOOD_STOP_THRESHOLD = 100;
 
 function newPlayerState(slot) {
   return {
@@ -54,9 +59,13 @@ function isAlive(p) {
   return p.parts.head > 0 && p.parts.torso > 0;
 }
 
+function totalHealth(p) {
+  return p.parts.head + p.parts.torso + p.parts.legs;
+}
+
 function createRoom(roomId) {
   if (!rooms.has(roomId)) {
-    rooms.set(roomId, { players: {}, order: [], tickInterval: null });
+    rooms.set(roomId, { players: {}, order: [], tickInterval: null, bloodLevel: 0, finished: false });
   }
   return rooms.get(roomId);
 }
@@ -65,6 +74,7 @@ function startRoomTick(roomId) {
   const room = rooms.get(roomId);
   if (!room || room.tickInterval) return;
   room.tickInterval = setInterval(() => {
+    if (room.finished) return;
     let changed = false;
     Object.values(room.players).forEach((p) => {
       if (p.stamina < 100) {
@@ -90,21 +100,33 @@ function broadcastStats() {
   });
 }
 
-function resolveAttack(room, roomId, socket, target) {
+function endFight(room, roomId, winnerSlot, reason) {
+  room.finished = true;
+  totalGamesPlayed += 1;
+  io.to(roomId).emit('game_over', { winnerSlot, reason });
+  broadcastStats();
+  stopRoomTick(room);
+}
+
+function resolveAttack(room, roomId, socket, type) {
+  if (room.finished) return;
+  const move = MOVES[type];
+  if (!move) return;
   const attacker = room.players[socket.id];
   if (!attacker || attacker.attacking || !isAlive(attacker)) return;
 
-  const cost = COSTS[target];
-  if (attacker.stamina < cost) {
+  if (attacker.stamina < move.cost) {
     socket.emit('too_tired');
     return;
   }
-  attacker.stamina -= cost;
+  attacker.stamina -= move.cost;
   attacker.attacking = true;
-  io.to(roomId).emit('attack_anim', { slot: attacker.slot, target });
+  io.to(roomId).emit('attack_anim', { slot: attacker.slot, target: type });
 
   const opponentId = room.order.find((id) => id !== socket.id);
   let hitPart = null;
+  let endedReason = null;
+  let winnerSlot = null;
 
   if (opponentId) {
     const opponent = room.players[opponentId];
@@ -112,32 +134,40 @@ function resolveAttack(room, roomId, socket, target) {
     const facingCorrect = (attacker.facing === 1 && opponent.x > attacker.x) ||
                            (attacker.facing === -1 && opponent.x < attacker.x);
 
-    if (dist < RANGES[target] && facingCorrect && isAlive(opponent)) {
-      hitPart = target;
-      let dmg = DAMAGE[target];
-      if (target === 'torso' && Math.random() < TORSO_CRIT_CHANCE) {
-        dmg += TORSO_CRIT_BONUS;
-      }
-      opponent.parts[target] = Math.max(0, opponent.parts[target] - dmg);
+    if (dist < move.range && facingCorrect && isAlive(opponent)) {
+      const part = move.part;
+      const prevLegs = opponent.parts.legs;
+      let dmg = move.dmg;
+      if (part === 'torso' && Math.random() < TORSO_CRIT_CHANCE) dmg += TORSO_CRIT_BONUS;
+      opponent.parts[part] = Math.max(0, opponent.parts[part] - dmg);
       attacker.stamina = Math.min(100, attacker.stamina + STAMINA_REFUND_ON_HIT);
+      hitPart = part;
+      room.bloodLevel += move.blood;
+
+      if (part === 'legs' && prevLegs > 0 && opponent.parts.legs <= 0) {
+        endedReason = 'legs_broken';
+        winnerSlot = attacker.slot;
+      } else if (!isAlive(opponent)) {
+        endedReason = 'knockout';
+        winnerSlot = attacker.slot;
+      } else if (room.bloodLevel >= BLOOD_STOP_THRESHOLD) {
+        endedReason = 'blood';
+        winnerSlot = totalHealth(attacker) >= totalHealth(opponent) ? attacker.slot : opponent.slot;
+      }
     }
   }
 
   io.to(roomId).emit('state_update', room.players);
-
   if (hitPart && opponentId) {
     io.to(roomId).emit('hit_landed', { targetSlot: room.players[opponentId].slot, part: hitPart });
   }
-
-  if (opponentId && !isAlive(room.players[opponentId])) {
-    totalGamesPlayed += 1;
-    io.to(roomId).emit('game_over', { winnerSlot: attacker.slot });
-    broadcastStats();
+  if (endedReason) {
+    endFight(room, roomId, winnerSlot, endedReason);
   }
 
   setTimeout(() => {
     if (attacker) attacker.attacking = false;
-  }, COOLDOWN[target]);
+  }, move.cooldown);
 }
 
 io.on('connection', (socket) => {
@@ -166,6 +196,8 @@ io.on('connection', (socket) => {
     socket.to(roomId).emit('opponent_joined', { slot, players: room.players });
 
     if (room.order.length === 2) {
+      room.finished = false;
+      room.bloodLevel = 0;
       io.to(roomId).emit('start_game', { players: room.players });
       startRoomTick(roomId);
     }
@@ -174,7 +206,7 @@ io.on('connection', (socket) => {
   socket.on('move', ({ dir }) => {
     const roomId = socket.data.roomId;
     const room = rooms.get(roomId);
-    if (!room || !room.players[socket.id]) return;
+    if (!room || !room.players[socket.id] || room.finished) return;
     const p = room.players[socket.id];
     if (!isAlive(p)) return;
     const speed = moveSpeed(p);
@@ -188,7 +220,7 @@ io.on('connection', (socket) => {
     const roomId = socket.data.roomId;
     const room = rooms.get(roomId);
     if (!room) return;
-    if (target !== 'head' && target !== 'torso' && target !== 'legs') return;
+    if (!MOVES[target]) return;
     resolveAttack(room, roomId, socket, target);
   });
 
@@ -227,13 +259,3 @@ bot.start((ctx) => {
     }
   );
 });
-
-bot.launch();
-console.log('Бот запущен');
-
-server.listen(process.env.PORT || 3000, () => {
-  console.log('Сервер игры запущен');
-});
-
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
