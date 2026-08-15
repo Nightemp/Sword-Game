@@ -49,9 +49,14 @@ let particles = [];
 let sparks = [];
 let shake = 0;
 
-document.getElementById('play-btn').addEventListener('click', function () {
+function hideMenu(e) {
+  if (e) e.preventDefault();
   document.getElementById('menu-overlay').style.display = 'none';
-});
+}
+const playBtn = document.getElementById('play-btn');
+playBtn.addEventListener('touchstart', hideMenu, { passive: false });
+playBtn.addEventListener('mousedown', hideMenu);
+playBtn.addEventListener('click', hideMenu);
 
 const socket = io();
 socket.emit('get_stats');
