@@ -23,24 +23,64 @@ const ARENA_WIDTH = 800;
 const rooms = new Map();
 let totalGamesPlayed = 0;
 
-function freshPlayerState(slot) {
+const RANGES = { head: 100, torso: 85, legs: 65 };
+const COSTS = { head: 12, torso: 18, legs: 24 };
+const DAMAGE = { head: 10, torso: 14, legs: 20 };
+const COOLDOWN = { head: 250, torso: 350, legs: 500 };
+const TORSO_CRIT_CHANCE = 0.15;
+const TORSO_CRIT_BONUS = 10;
+const STAMINA_REGEN = 4;
+const STAMINA_REFUND_ON_HIT = 6;
+const REGEN_INTERVAL = 200;
+
+function newPlayerState(slot) {
   return {
     x: slot === 0 ? 150 : ARENA_WIDTH - 150,
     facing: slot === 0 ? 1 : -1,
-    hp: 100,
+    parts: { head: 100, torso: 100, legs: 100 },
     stamina: 100,
     attacking: false,
-    blocking: false,
-    knockedOut: false,
     slot,
   };
 }
 
+function moveSpeed(p) {
+  if (p.parts.legs <= 0) return 3;
+  if (p.parts.legs <= 40) return 6;
+  return 10;
+}
+
+function isAlive(p) {
+  return p.parts.head > 0 && p.parts.torso > 0;
+}
+
 function createRoom(roomId) {
   if (!rooms.has(roomId)) {
-    rooms.set(roomId, { players: {}, order: [], loopStarted: false });
+    rooms.set(roomId, { players: {}, order: [], tickInterval: null });
   }
   return rooms.get(roomId);
+}
+
+function startRoomTick(roomId) {
+  const room = rooms.get(roomId);
+  if (!room || room.tickInterval) return;
+  room.tickInterval = setInterval(() => {
+    let changed = false;
+    Object.values(room.players).forEach((p) => {
+      if (p.stamina < 100) {
+        p.stamina = Math.min(100, p.stamina + STAMINA_REGEN);
+        changed = true;
+      }
+    });
+    if (changed) io.to(roomId).emit('state_update', room.players);
+  }, REGEN_INTERVAL);
+}
+
+function stopRoomTick(room) {
+  if (room.tickInterval) {
+    clearInterval(room.tickInterval);
+    room.tickInterval = null;
+  }
 }
 
 function broadcastStats() {
@@ -50,21 +90,54 @@ function broadcastStats() {
   });
 }
 
-function startStaminaLoop(room, roomId) {
-  if (room.loopStarted) return;
-  room.loopStarted = true;
-  setInterval(() => {
-    let changed = false;
-    Object.values(room.players).forEach((p) => {
-      if (p.knockedOut) return;
-      const regenRate = p.blocking ? 0.4 : 0.8;
-      if (p.stamina < 100) {
-        p.stamina = Math.min(100, p.stamina + regenRate);
-        changed = true;
+function resolveAttack(room, roomId, socket, target) {
+  const attacker = room.players[socket.id];
+  if (!attacker || attacker.attacking || !isAlive(attacker)) return;
+
+  const cost = COSTS[target];
+  if (attacker.stamina < cost) {
+    socket.emit('too_tired');
+    return;
+  }
+  attacker.stamina -= cost;
+  attacker.attacking = true;
+  io.to(roomId).emit('attack_anim', { slot: attacker.slot, target });
+
+  const opponentId = room.order.find((id) => id !== socket.id);
+  let hitPart = null;
+
+  if (opponentId) {
+    const opponent = room.players[opponentId];
+    const dist = Math.abs(opponent.x - attacker.x);
+    const facingCorrect = (attacker.facing === 1 && opponent.x > attacker.x) ||
+                           (attacker.facing === -1 && opponent.x < attacker.x);
+
+    if (dist < RANGES[target] && facingCorrect && isAlive(opponent)) {
+      hitPart = target;
+      let dmg = DAMAGE[target];
+      if (target === 'torso' && Math.random() < TORSO_CRIT_CHANCE) {
+        dmg += TORSO_CRIT_BONUS;
       }
-    });
-    if (changed) io.to(roomId).emit('state_update', room.players);
-  }, 200);
+      opponent.parts[target] = Math.max(0, opponent.parts[target] - dmg);
+      attacker.stamina = Math.min(100, attacker.stamina + STAMINA_REFUND_ON_HIT);
+    }
+  }
+
+  io.to(roomId).emit('state_update', room.players);
+
+  if (hitPart && opponentId) {
+    io.to(roomId).emit('hit_landed', { targetSlot: room.players[opponentId].slot, part: hitPart });
+  }
+
+  if (opponentId && !isAlive(room.players[opponentId])) {
+    totalGamesPlayed += 1;
+    io.to(roomId).emit('game_over', { winnerSlot: attacker.slot });
+    broadcastStats();
+  }
+
+  setTimeout(() => {
+    if (attacker) attacker.attacking = false;
+  }, COOLDOWN[target]);
 }
 
 io.on('connection', (socket) => {
@@ -84,7 +157,7 @@ io.on('connection', (socket) => {
       return;
     }
     const slot = room.order.length;
-    room.players[socket.id] = freshPlayerState(slot);
+    room.players[socket.id] = newPlayerState(slot);
     room.order.push(socket.id);
     socket.join(roomId);
     socket.data.roomId = roomId;
@@ -94,7 +167,7 @@ io.on('connection', (socket) => {
 
     if (room.order.length === 2) {
       io.to(roomId).emit('start_game', { players: room.players });
-      startStaminaLoop(room, roomId);
+      startRoomTick(roomId);
     }
   });
 
@@ -103,99 +176,20 @@ io.on('connection', (socket) => {
     const room = rooms.get(roomId);
     if (!room || !room.players[socket.id]) return;
     const p = room.players[socket.id];
-    if (p.knockedOut) return;
-    const staminaFactor = 0.4 + 0.6 * (p.stamina / 100);
-    const speed = 10 * staminaFactor;
+    if (!isAlive(p)) return;
+    const speed = moveSpeed(p);
     p.x += dir * speed;
     p.x = Math.max(20, Math.min(ARENA_WIDTH - 20, p.x));
     p.facing = dir !== 0 ? dir : p.facing;
     io.to(roomId).emit('state_update', room.players);
   });
 
-  socket.on('block_start', () => {
-    const roomId = socket.data.roomId;
-    const room = rooms.get(roomId);
-    if (!room || !room.players[socket.id]) return;
-    const p = room.players[socket.id];
-    if (p.knockedOut || p.attacking) return;
-    p.blocking = true;
-    io.to(roomId).emit('state_update', room.players);
-  });
-
-  socket.on('block_end', () => {
-    const roomId = socket.data.roomId;
-    const room = rooms.get(roomId);
-    if (!room || !room.players[socket.id]) return;
-    room.players[socket.id].blocking = false;
-    io.to(roomId).emit('state_update', room.players);
-  });
-
-  socket.on('attack', () => {
-    const roomId = socket.data.roomId;
-    const room = rooms.get(roomId);
-    if (!room || !room.players[socket.id]) return;
-    const attacker = room.players[socket.id];
-    if (attacker.attacking || attacker.blocking || attacker.knockedOut) return;
-    const STAMINA_COST = 16;
-    if (attacker.stamina < STAMINA_COST) {
-      socket.emit('attack_denied');
-      return;
-    }
-    attacker.stamina -= STAMINA_COST;
-    attacker.attacking = true;
-    io.to(roomId).emit('attack_anim', { slot: attacker.slot });
-
-    const opponentId = room.order.find((id) => id !== socket.id);
-    let hit = false;
-    let blocked = false;
-    if (opponentId) {
-      const opponent = room.players[opponentId];
-      const dist = Math.abs(opponent.x - attacker.x);
-      const facingCorrect = (attacker.facing === 1 && opponent.x > attacker.x) ||
-                             (attacker.facing === -1 && opponent.x < attacker.x);
-      if (dist < 70 && facingCorrect && !opponent.knockedOut) {
-        if (opponent.blocking) {
-          blocked = true;
-          opponent.stamina = Math.max(0, opponent.stamina - 10);
-          opponent.hp = Math.max(0, opponent.hp - 2);
-          opponent.x = Math.max(20, Math.min(ARENA_WIDTH - 20, opponent.x + attacker.facing * 6));
-        } else {
-          opponent.hp = Math.max(0, opponent.hp - 12);
-          opponent.x = Math.max(20, Math.min(ARENA_WIDTH - 20, opponent.x + attacker.facing * 18));
-          hit = true;
-        }
-      }
-    }
-
-    io.to(roomId).emit('state_update', room.players);
-    if (hit) {
-      io.to(roomId).emit('hit_landed', { targetSlot: room.players[opponentId].slot });
-    } else if (blocked) {
-      io.to(roomId).emit('block_landed', { targetSlot: room.players[opponentId].slot });
-    }
-
-    if (opponentId && room.players[opponentId].hp <= 0 && !room.players[opponentId].knockedOut) {
-      room.players[opponentId].knockedOut = true;
-      totalGamesPlayed += 1;
-      io.to(roomId).emit('knockout', { winnerSlot: attacker.slot, loserSlot: room.players[opponentId].slot });
-      io.to(roomId).emit('state_update', room.players);
-      broadcastStats();
-    }
-
-    setTimeout(() => {
-      if (room.players[socket.id]) room.players[socket.id].attacking = false;
-    }, 300);
-  });
-
-  socket.on('rematch', () => {
+  socket.on('attack', ({ target }) => {
     const roomId = socket.data.roomId;
     const room = rooms.get(roomId);
     if (!room) return;
-    room.order.forEach((id) => {
-      const slot = room.players[id].slot;
-      room.players[id] = freshPlayerState(slot);
-    });
-    io.to(roomId).emit('start_game', { players: room.players });
+    if (target !== 'head' && target !== 'torso' && target !== 'legs') return;
+    resolveAttack(room, roomId, socket, target);
   });
 
   socket.on('disconnect', () => {
@@ -205,7 +199,10 @@ io.on('connection', (socket) => {
       delete room.players[socket.id];
       room.order = room.order.filter((id) => id !== socket.id);
       io.to(roomId).emit('opponent_left');
-      if (room.order.length === 0) rooms.delete(roomId);
+      if (room.order.length === 0) {
+        stopRoomTick(room);
+        rooms.delete(roomId);
+      }
     }
     broadcastStats();
   });
