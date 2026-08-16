@@ -1,739 +1,189 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Sword_bot</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+<title>Кулачный бой</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
-  :root{ --blood:#e0273a; --blood-dark:#8f0f1c; --gold:#e4b45a; }
-  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
-  html,body{ margin:0; padding:0; height:100%; background:#000; color:#fff; font-family:'Rubik',sans-serif; overflow:hidden; user-select:none; }
-  #app{ height:100vh; display:flex; flex-direction:column; position:relative; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: #060402; font-family: sans-serif; touch-action: none;
+    -webkit-user-select: none; user-select: none;
+  }
+  #arena-wrap { position: relative; width: 100%; height: 62vh; overflow: hidden; }
+  #arena { display: block; width: 100%; height: 100%; }
+  #hud { position: absolute; top: 8px; left: 0; right: 0; display: flex; justify-content: space-between; padding: 0 14px; z-index: 5; }
+  .zone-bars { width: 44%; }
+  .zone-bars.right { text-align: right; }
+  .zone-label { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+  .zone-bars.right .zone-label { flex-direction: row-reverse; }
+  .zone-name { font-size: 9px; color: #ccc; width: 32px; }
+  .zone-bar { flex: 1; height: 8px; background: #1a1410; border-radius: 4px; overflow: hidden; border: 1px solid #000; }
+  .zone-fill { height: 100%; background: linear-gradient(#ff5f5f, #b8102a); transition: width 0.15s linear; }
+  .stamina-bar { height: 6px; background: #1a1410; border-radius: 3px; overflow: hidden; border: 1px solid #000; margin-top: 3px; }
+  .stamina-fill { height: 100%; background: linear-gradient(#7ed957, #2e8b3f); transition: width 0.15s linear; }
+  #win-counters { position: absolute; top: 72px; left: 0; right: 0; display: flex; justify-content: space-between; padding: 0 14px; z-index: 5; font-size: 11px; color: #ffe066; }
 
-  #header{ background:#fff; color:#111; padding: 14px 16px 12px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid #eee; }
-  #header .close{ color:#8a5cf6; font-size:16px; font-weight:500; cursor:pointer; }
-  #header .titlewrap{ text-align:center; }
-  #header .titlewrap b{ font-size:16px; display:block; }
-  #header .titlewrap span{ font-size:12px; color:#8a8a8e; }
-  #header .dots{ color:#8a5cf6; font-size:20px; }
+  #controls {
+    position: fixed; bottom: 0; left: 0; right: 0; height: 38vh;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+    padding: 10px 14px; box-sizing: border-box; background: linear-gradient(#0c0906, #050302);
+  }
+  #move-row { width: 100%; display: flex; justify-content: center; }
+  #joystick-zone {
+    width: 110px; height: 110px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(255,255,255,0.1), rgba(255,255,255,0.02));
+    position: relative; border: 1px solid rgba(255,255,255,0.15);
+  }
+  #joystick-knob {
+    width: 50px; height: 50px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #fff, #999);
+    position: absolute; top: 30px; left: 30px; pointer-events: none;
+    box-shadow: 0 3px 8px rgba(0,0,0,0.5);
+  }
+  #action-row { display: flex; gap: 10px; align-items: center; justify-content: center; }
+  .zone-btn {
+    width: 78px; height: 78px; border-radius: 50%;
+    color: white; font-size: 12px; font-weight: bold; letter-spacing: 0.5px;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.6); border: 3px solid;
+  }
+  #leg-btn { background: radial-gradient(circle at 35% 30%, #d68a3a, #7a4813 70%); border-color: #4a2c0c; }
+  #body-btn { background: radial-gradient(circle at 35% 30%, #e0c34a, #8a6f13 70%); border-color: #4a3c0c; }
+  #head-btn { background: radial-gradient(circle at 35% 30%, #ff5a5a, #a91d1d 70%); border-color: #6e1010; }
+  .zone-btn:active { filter: brightness(0.85); }
+  #block-btn {
+    width: 62px; height: 62px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #5a8fd6, #22447a 70%);
+    color: white; font-size: 11px; font-weight: bold;
+    border: 3px solid #14294a; display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.6);
+  }
+  #block-btn.active { filter: brightness(1.3); }
+  #status { position: absolute; top: 38%; left: 0; right: 0; text-align: center; color: #ffe066; font-size: 22px; text-shadow: 0 2px 8px #000; z-index: 5; }
 
-  #menu{ position:absolute; inset:0; z-index:50; background:
-      radial-gradient(ellipse 60% 45% at 50% 15%, rgba(228,180,90,0.12), transparent 60%),
-      linear-gradient(180deg,#151011,#0a0808);
-    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; padding:24px; text-align:center; }
-  #menu h1{ font-size:24px; letter-spacing:0.06em; margin:0 0 4px; }
-  #menu p.tagline{ color:#8a8a8e; font-size:12px; margin:0 0 18px; }
-  .mode-btn{ width:100%; max-width:300px; padding:16px; border-radius:10px; border:1px solid rgba(255,255,255,0.14);
-    background: rgba(255,255,255,0.04); color:#fff; font-size:15px; font-weight:700; letter-spacing:0.03em; cursor:pointer; text-align:left; }
-  .mode-btn span{ display:block; font-size:11px; font-weight:400; color:#9a9a9a; margin-top:3px; letter-spacing:0.02em; }
-  .mode-btn.offline{ border-color: rgba(228,180,90,0.35); }
-  .mode-btn.online{ border-color: rgba(90,180,228,0.35); }
-  #onlinePanel{ display:none; flex-direction:column; gap:10px; width:100%; max-width:300px; }
-  #onlinePanel input{ width:100%; padding:12px; border-radius:8px; border:1px solid rgba(255,255,255,0.18);
-    background:rgba(255,255,255,0.05); color:#fff; font-size:16px; text-align:center; letter-spacing:0.15em; text-transform:uppercase; }
-  #onlinePanel .row{ display:flex; gap:8px; }
-  #onlinePanel button{ flex:1; padding:12px; border-radius:8px; border:1px solid rgba(90,180,228,0.4);
-    background:rgba(90,180,228,0.12); color:#bfe4ff; font-weight:700; font-size:13px; cursor:pointer; }
-  #onlineStatus{ font-size:12px; color:#8a8a8e; min-height:16px; }
-  #backToMenu{ font-size:12px; color:#8a5cf6; cursor:pointer; margin-top:4px; }
+  #ko-screen {
+    position: absolute; inset: 0; z-index: 40; display: none;
+    align-items: center; justify-content: center; flex-direction: column; gap: 16px;
+    background: rgba(0,0,0,0.55);
+  }
+  #ko-screen.show { display: flex; }
+  #ko-title { font-size: 30px; font-weight: bold; color: #ff3b3b; text-shadow: 0 3px 10px #000; letter-spacing: 2px; }
+  #ko-sub { color: #eee; font-size: 14px; }
+  #rematch-btn {
+    padding: 12px 36px; font-size: 15px; font-weight: bold; color: white;
+    background: linear-gradient(#ff5a5a, #a91d1d); border: 2px solid #6e1010;
+    border-radius: 12px;
+  }
 
-  #stage{ position:relative; flex:1 1 auto;
-    background: radial-gradient(ellipse 60% 55% at 50% 0%, rgba(255,255,255,0.16), rgba(255,255,255,0) 60%),
-      linear-gradient(180deg, #1c2b26 0%, #14201d 55%, #241a14 55%, #17110d 100%);
-    overflow:hidden; transition: transform 0.05s ease; }
-  #stage.shake{ animation: shake 0.35s ease; }
-  #stage.shake-hard{ animation: shakeHard 0.5s ease; }
-  @keyframes shake{ 0%,100%{transform:translate(0,0);} 20%{transform:translate(-4px,2px);} 40%{transform:translate(4px,-2px);} 60%{transform:translate(-3px,1px);} 80%{transform:translate(3px,-1px);} }
-  @keyframes shakeHard{ 0%,100%{transform:translate(0,0);} 15%{transform:translate(-9px,5px) rotate(-0.5deg);} 30%{transform:translate(8px,-5px) rotate(0.5deg);} 45%{transform:translate(-7px,4px);} 60%{transform:translate(6px,-3px);} 75%{transform:translate(-4px,2px);} 90%{transform:translate(3px,-1px);} }
+  #menu-screen {
+    position: fixed; inset: 0; z-index: 50;
+    background: radial-gradient(ellipse at top, #3a2f28, #060402 80%);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    color: #eee; text-align: center; gap: 18px;
+  }
+  #menu-screen h1 { font-size: 26px; margin: 0; letter-spacing: 1px; color: #ffe066; text-shadow: 0 2px 10px #000; }
+  #menu-stats { font-size: 14px; color: #ccc; display: flex; gap: 18px; }
+  #menu-stats span { color: #ffe066; font-weight: bold; }
+  #play-btn {
+    padding: 16px 48px; font-size: 18px; font-weight: bold; color: white;
+    background: linear-gradient(#ff5a5a, #a91d1d); border: 2px solid #6e1010;
+    border-radius: 12px; box-shadow: 0 6px 16px rgba(0,0,0,0.5);
+  }
+  #settings-btn {
+    width: 44px; height: 44px; border-radius: 50%; background: rgba(255,255,255,0.1);
+    color: white; font-size: 20px; border: 1px solid rgba(255,255,255,0.2);
+    position: absolute; top: 20px; right: 20px; display: flex; align-items: center; justify-content: center;
+  }
 
-  .floor-lines{ position:absolute; left:0; right:0; bottom:0; height:44%; background: repeating-linear-gradient(90deg, rgba(255,255,255,0.03) 0 2px, transparent 2px 60px); }
-  .ring-outline{ position:absolute; left:4%; right:4%; bottom:2%; height:40%; border:1px solid rgba(255,255,255,0.18);
-    clip-path: polygon(14% 0%, 86% 0%, 100% 40%, 100% 100%, 0% 100%, 0% 40%); pointer-events:none; }
-  #bloodCanvas{ position:absolute; inset:0; width:100%; height:100%; pointer-events:none; z-index:5; }
-  #dmgLayer{ position:absolute; inset:0; pointer-events:none; z-index:9; }
-
-  #modeTag{ position:absolute; top:14px; left:50%; transform:translateX(-50%); font-size:9px; letter-spacing:0.15em;
-    color:rgba(255,255,255,0.4); z-index:6; text-transform:uppercase; }
-
-  #hud{ position:absolute; top:26px; left:14px; right:14px; display:flex; justify-content:space-between; gap:14px; z-index:6; }
-  .fighter-hud{ width:46%; }
-  .fighter-hud .name{ font-size:11px; letter-spacing:0.08em; color:#d8d8d8; margin-bottom:4px; text-transform:uppercase; font-weight:600; display:flex; align-items:center; gap:6px; }
-  .fighter-hud.right{ text-align:right; }
-  .fighter-hud.right .name{ justify-content:flex-end; }
-  .tired-tag{ font-size:8px; color:#ffb454; border:1px solid #ffb454; padding:1px 5px; border-radius:8px; opacity:0; transition:opacity 0.2s ease; }
-  .tired-tag.show{ opacity:1; }
-  .zonebars{ display:flex; flex-direction:column; gap:3px; }
-  .fighter-hud.right .zonebars{ align-items:flex-end; }
-  .zrow{ display:flex; align-items:center; gap:6px; }
-  .fighter-hud.right .zrow{ flex-direction:row-reverse; }
-  .zrow .zn{ font-size:8px; color:rgba(255,255,255,0.55); width:32px; letter-spacing:0.05em; }
-  .fighter-hud.right .zn{ text-align:right; }
-  .zrow .ztrack{ flex:1; height:8px; border-radius:3px; background:rgba(0,0,0,0.45); border:1px solid rgba(255,255,255,0.15); overflow:hidden; }
-  .zrow .zfill{ height:100%; width:100%; transform-origin:left; background:linear-gradient(90deg, var(--blood-dark), var(--blood)); transition:transform 0.2s ease; }
-  .fighter-hud.right .zfill{ transform-origin:right; }
-
-  #victoryPill{ position:absolute; top:112px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,0.45); border:1px solid rgba(228,180,90,0.4);
-    color:var(--gold); font-size:11px; letter-spacing:0.08em; padding:4px 12px; border-radius:20px; z-index:6; font-weight:600; white-space:nowrap; }
-  #victoryPill b{ margin:0 3px 0 4px; font-size:13px; }
-  #victoryPill .sep{ color:rgba(255,255,255,0.3); margin:0 4px; }
-  #victoryPill .loss-lbl{ color:#8fa8ff; }
-
-  #comboText{ position:absolute; top:144px; left:50%; transform:translateX(-50%) scale(0.8); font-size:15px; font-weight:800; color:#ffd66b;
-    letter-spacing:0.05em; opacity:0; text-shadow:0 2px 8px rgba(0,0,0,0.8); transition: all 0.15s ease; z-index:7; }
-  #comboText.show{ opacity:1; transform:translateX(-50%) scale(1); }
-
-  #statusMsg{ position:absolute; left:0; right:0; top:44%; text-align:center; z-index:6; font-size:22px; color:#e8c34a; font-weight:700;
-    text-shadow:0 2px 10px rgba(0,0,0,0.7); pointer-events:none; transition: opacity 0.3s ease; letter-spacing:0.02em; }
-  #statusMsg.lose{ color:#8fa8ff; }
-
-  .fighter{ position:absolute; bottom:8%; width:100px; height:180px; transition: transform 0.15s ease; }
-  .fighter.hit{ animation: hitflash 0.18s ease; }
-  @keyframes hitflash{ 0%{filter:brightness(1)} 40%{filter:brightness(2.4) drop-shadow(0 0 8px #ff4747)} 100%{filter:brightness(1)} }
-  .fighter.knockdown{ animation: kd 0.5s ease forwards; }
-  @keyframes kd{ 0%{transform:rotate(0deg) translateY(0);} 30%{transform:rotate(-14deg) translateY(-8px);} 100%{transform:rotate(16deg) translateY(10px);} }
-  .fighter.broken{ transform: rotate(10deg) translateY(10px); filter:saturate(0.5) brightness(0.68); }
-  .fighter.dying{ transform: rotate(85deg) translateY(50px); opacity:0; transition: all 0.5s ease; }
-
-  #player{ left:12%; }
-  #player .bruise{ transform:translate(-50%,-50%) scaleX(1); }
-  #opponent{ right:12%; transform: scaleX(-1); }
-  #opponent.knockdown{ animation: kdR 0.5s ease forwards; }
-  @keyframes kdR{ 0%{transform:scaleX(-1) rotate(0deg) translateY(0);} 30%{transform:scaleX(-1) rotate(-14deg) translateY(-8px);} 100%{transform:scaleX(-1) rotate(16deg) translateY(10px);} }
-  #opponent.broken{ transform: scaleX(-1) rotate(10deg) translateY(10px); }
-  #opponent.dying{ transform: scaleX(-1) rotate(85deg) translateY(50px); }
-  #opponent.hit{ animation: hitflashR 0.18s ease; }
-  @keyframes hitflashR{ 0%{filter:brightness(1)} 40%{filter:brightness(2.4) drop-shadow(0 0 8px #ff4747)} 100%{filter:brightness(1)} }
-
-  .bruise{ position:absolute; width:34px; height:22px; border-radius:50%; background: radial-gradient(ellipse, rgba(140,10,16,0.9), rgba(90,6,10,0) 70%);
-    opacity:0; pointer-events:none; transform:translate(-50%,-50%) scaleX(-1); transition: opacity 0.3s ease; }
-  #opponent .bruise{ transform:translate(-50%,-50%) scaleX(1); }
-  .bruise.b-head{ left:50%; top:17%; }
-  .bruise.b-body{ left:50%; top:44%; }
-  .bruise.b-legs{ left:50%; top:70%; }
-  .bruise.dripping::after{ content:''; position:absolute; left:50%; top:60%; width:3px; height:10px; background: linear-gradient(180deg, var(--blood), transparent);
-    border-radius:2px; animation: drip 1.1s linear infinite; }
-  @keyframes drip{ 0%{ transform:translate(-50%,0); opacity:0.9; height:6px;} 80%{ opacity:0.4; height:16px;} 100%{ transform:translate(-50%,22px); opacity:0; height:18px;} }
-
-  .fin-btn{ position:absolute; left:50%; top:-6px; transform:translateX(-50%) scale(0.85); background: linear-gradient(180deg, var(--blood), #6e0e15);
-    color:#fff; border:1px solid #ff7a7a; font-weight:700; letter-spacing:0.06em; font-size:11px; padding:7px 14px; border-radius:20px; cursor:pointer;
-    opacity:0; pointer-events:none; transition: all 0.25s ease; box-shadow:0 0 18px rgba(224,39,58,0.6); animation: pulse 1s infinite; z-index:7; }
-  .fin-btn.show{ opacity:1; pointer-events:auto; transform:translateX(-50%) scale(1); }
-  @keyframes pulse{ 0%,100%{box-shadow:0 0 12px rgba(224,39,58,0.5);} 50%{box-shadow:0 0 24px rgba(224,39,58,0.95);} }
-
-  .dmg-pop{ position:absolute; font-weight:800; font-size:18px; color:#fff; text-shadow: 0 0 6px rgba(0,0,0,0.9), 0 0 14px rgba(224,39,58,0.6);
-    animation: popup 0.75s ease forwards; z-index:10; }
-  .dmg-pop.block{ color:#8fd0ff; font-size:14px; }
-  .dmg-pop.enemy{ text-shadow: 0 0 6px rgba(0,0,0,0.9), 0 0 14px rgba(80,140,255,0.6); }
-  @keyframes popup{ 0%{ transform:translate(-50%,0) scale(0.7); opacity:0;} 15%{ opacity:1; transform:translate(-50%,-6px) scale(1.15);} 100%{ transform:translate(-50%,-46px) scale(1); opacity:0;} }
-
-  #staminaWrap{ padding: 0 20px 6px; background:#000; }
-  #staminaLabel{ font-size:9px; letter-spacing:0.12em; color:#8a8a8e; margin-bottom:3px; text-transform:uppercase; display:flex; justify-content:space-between; }
-  #staminaBar{ height:7px; border-radius:3px; background:rgba(255,255,255,0.08); overflow:hidden; }
-  #staminaFill{ height:100%; width:100%; background:linear-gradient(90deg,#3f7a3a,#7fca5a); transition: width 0.15s ease; }
-  #staminaFill.low{ background:linear-gradient(90deg,#7a4a1a,#ca8f2f); }
-
-  #controls{ position:relative; background:#000; padding: 10px 20px calc(16px + env(safe-area-inset-bottom)); display:flex; align-items:center; justify-content:space-between; z-index:8; }
-  #joystick{ width:80px; height:80px; border-radius:50%; background: radial-gradient(circle at 40% 35%, #2a2a2a, #0a0a0a 70%);
-    border:1px solid rgba(255,255,255,0.12); display:flex; align-items:center; justify-content:center; position:relative; }
-  #joystick .knob{ width:34px; height:34px; border-radius:50%; background: radial-gradient(circle at 35% 30%, #fff, #cfcfcf 60%, #9d9d9d); box-shadow:0 3px 6px rgba(0,0,0,0.5); }
-
-  #diamond{ position:relative; width:150px; height:150px; }
-  .db{ position:absolute; width:56px; height:56px; border-radius:50%; border:1px solid rgba(255,255,255,0.18); display:flex; flex-direction:column;
-    align-items:center; justify-content:center; font-size:8px; font-weight:800; letter-spacing:0.02em; color:#fff; cursor:pointer;
-    transition: transform 0.08s ease, filter 0.15s ease; }
-  .db span{ margin-top:1px; }
-  .db:active:not(:disabled){ transform: scale(0.9); }
-  .db:disabled{ opacity:0.3; }
-  #btnHeavy{ top:0; left:47px; background: radial-gradient(circle at 35% 30%, #ffd66b, #b8841c 75%); box-shadow:0 4px 14px rgba(184,132,28,0.55); width:60px; height:60px; }
-  #btnHook{ top:47px; left:0; background: radial-gradient(circle at 35% 30%, #ff5a5a, #8a1414 75%); box-shadow:0 4px 14px rgba(138,20,20,0.55); }
-  #btnJab{ top:47px; left:94px; background: radial-gradient(circle at 35% 30%, #ff8a6b, #b8451c 75%); box-shadow:0 4px 14px rgba(184,69,28,0.5); }
-  #btnKick{ top:94px; left:47px; background: radial-gradient(circle at 35% 30%, #7fb7ff, #1c4fb8 75%); box-shadow:0 4px 14px rgba(28,79,184,0.5); width:60px; height:60px; }
+  #settings-modal {
+    position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,0.75);
+    display: none; align-items: center; justify-content: center;
+  }
+  #settings-modal.open { display: flex; }
+  #settings-box {
+    background: #241c16; border: 1px solid #4a3a2c; border-radius: 14px;
+    padding: 22px; width: 82%; max-width: 340px; color: #eee;
+  }
+  #settings-box h2 { margin: 0 0 16px 0; font-size: 18px; color: #ffe066; }
+  .setting-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-top: 1px solid #3a2f28; }
+  .setting-row:first-of-type { border-top: none; }
+  .toggle { width: 46px; height: 26px; border-radius: 13px; background: #444; position: relative; flex-shrink: 0; }
+  .toggle.on { background: #d62828; }
+  .toggle-knob { width: 20px; height: 20px; border-radius: 50%; background: white; position: absolute; top: 3px; left: 3px; transition: left 0.15s; }
+  .toggle.on .toggle-knob { left: 23px; }
+  #close-settings { margin-top: 18px; width: 100%; padding: 10px; background: #4a3a2c; color: white; border: none; border-radius: 8px; }
 </style>
 </head>
 <body>
-<div id="app">
+  <div id="menu-screen">
+    <button id="settings-btn">⚙️</button>
+    <h1>🥊 Кулачный бой</h1>
+    <div id="menu-stats">
+      <div>Онлайн: <span id="stat-online">—</span></div>
+      <div>Сыграно боёв: <span id="stat-games">—</span></div>
+    </div>
+    <button id="play-btn">Играть</button>
+  </div>
 
-  <div id="menu">
-    <h1>🗡 Sword_bot</h1>
-    <p class="tagline">Выбери режим боя</p>
-    <button class="mode-btn offline" id="pickOffline">ОФФЛАЙН<span>Бой против бота — играть сразу</span></button>
-    <button class="mode-btn online" id="pickOnline">ОНЛАЙН<span>Дуэль с другим игроком по коду комнаты</span></button>
-    <div id="onlinePanel">
-      <input id="roomInput" placeholder="КОД КОМНАТЫ" maxlength="6">
-      <div class="row">
-        <button id="createRoom">Создать</button>
-        <button id="joinRoom">Войти</button>
+  <div id="settings-modal">
+    <div id="settings-box">
+      <h2>Настройки</h2>
+      <div class="setting-row">
+        <span>Звук</span>
+        <div class="toggle on" id="toggle-sound"><div class="toggle-knob"></div></div>
       </div>
-      <div id="onlineStatus"></div>
-      <div id="backToMenu">← Назад</div>
-    </div>
-  </div>
-
-  <div id="header">
-    <div class="close" id="closeBtn">Закрыть</div>
-    <div class="titlewrap"><b>Sword_bot</b><span>мини-приложение</span></div>
-    <div class="dots">•••</div>
-  </div>
-
-  <div id="stage">
-    <div class="floor-lines"></div>
-    <div class="ring-outline"></div>
-    <canvas id="bloodCanvas"></canvas>
-    <div id="dmgLayer"></div>
-    <div id="modeTag">Оффлайн · бой с ботом</div>
-
-    <div id="hud">
-      <div class="fighter-hud">
-        <div class="name">Вы <span class="tired-tag" id="tiredTag">УСТАЛ</span></div>
-        <div class="zonebars">
-          <div class="zrow"><span class="zn">Голова</span><div class="ztrack"><div class="zfill" id="p-head"></div></div></div>
-          <div class="zrow"><span class="zn">Тело</span><div class="ztrack"><div class="zfill" id="p-body"></div></div></div>
-          <div class="zrow"><span class="zn">Ноги</span><div class="ztrack"><div class="zfill" id="p-legs"></div></div></div>
-        </div>
+      <div class="setting-row">
+        <span>Расчленёнка</span>
+        <div class="toggle" id="toggle-gore"><div class="toggle-knob"></div></div>
       </div>
-      <div class="fighter-hud right">
-        <div class="name" id="oppName">Соперник</div>
-        <div class="zonebars">
-          <div class="zrow"><span class="zn">Голова</span><div class="ztrack"><div class="zfill" id="o-head"></div></div></div>
-          <div class="zrow"><span class="zn">Тело</span><div class="ztrack"><div class="zfill" id="o-body"></div></div></div>
-          <div class="zrow"><span class="zn">Ноги</span><div class="ztrack"><div class="zfill" id="o-legs"></div></div></div>
-        </div>
-      </div>
+      <button id="close-settings">Закрыть</button>
     </div>
-
-    <div id="victoryPill">ПОБЕДЫ<b id="victoryCount">0</b><span class="sep">·</span><span class="loss-lbl">ПОРАЖЕНИЯ</span><b id="lossCount">0</b></div>
-    <div id="comboText">КОМБО x2</div>
-    <div id="statusMsg">Ждём соперника...</div>
-
-    <div class="fighter" id="player">
-      <div class="bruise b-head" id="br-p-head"></div>
-      <div class="bruise b-body" id="br-p-body"></div>
-      <div class="bruise b-legs" id="br-p-legs"></div>
-      <svg viewBox="0 0 100 180" width="100" height="180">
-        <ellipse cx="50" cy="172" rx="34" ry="6" fill="rgba(0,0,0,0.4)"/>
-        <rect x="34" y="118" width="12" height="52" rx="5" fill="#1a1a1a"/>
-        <rect x="54" y="118" width="12" height="52" rx="5" fill="#1a1a1a"/>
-        <rect x="30" y="62" width="40" height="62" rx="10" fill="#2f8f5b"/>
-        <rect x="18" y="66" width="13" height="46" rx="6" fill="#2f8f5b" transform="rotate(6 24 66)"/>
-        <rect x="69" y="66" width="13" height="46" rx="6" fill="#2f8f5b" transform="rotate(-4 75 66)"/>
-        <g transform="translate(24,108)"><ellipse cx="0" cy="1" rx="10" ry="8.5" fill="#c81f2c" stroke="#7a0f16" stroke-width="1.2"/><rect x="-7" y="7" width="14" height="6" rx="2.5" fill="#111"/><path d="M-6 -2 Q0 -8 6 -2" stroke="#8f1520" stroke-width="1.4" fill="none" opacity="0.7"/><ellipse cx="-3" cy="-2.5" rx="3.4" ry="2.6" fill="#e6545f" opacity="0.55"/></g>
-        <g transform="translate(78,104)"><ellipse cx="0" cy="1" rx="10" ry="8.5" fill="#c81f2c" stroke="#7a0f16" stroke-width="1.2"/><rect x="-7" y="7" width="14" height="6" rx="2.5" fill="#111"/><path d="M-6 -2 Q0 -8 6 -2" stroke="#8f1520" stroke-width="1.4" fill="none" opacity="0.7"/><ellipse cx="-3" cy="-2.5" rx="3.4" ry="2.6" fill="#e6545f" opacity="0.55"/></g>
-        <circle cx="50" cy="34" r="24" fill="#e0a56f"/>
-        <circle cx="43" cy="32" r="3" fill="#1a1a1a"/>
-        <circle cx="57" cy="32" r="3" fill="#1a1a1a"/>
-      </svg>
-    </div>
-
-    <div class="fighter" id="opponent">
-      <div class="bruise b-head" id="br-head"></div>
-      <div class="bruise b-body" id="br-body"></div>
-      <div class="bruise b-legs" id="br-legs"></div>
-      <svg viewBox="0 0 100 180" width="100" height="180">
-        <ellipse cx="50" cy="172" rx="34" ry="6" fill="rgba(0,0,0,0.4)"/>
-        <rect x="34" y="118" width="12" height="52" rx="5" fill="#1a1a1a"/>
-        <rect x="54" y="118" width="12" height="52" rx="5" fill="#1a1a1a"/>
-        <rect x="30" y="62" width="40" height="62" rx="10" fill="#7a2020"/>
-        <rect x="18" y="66" width="13" height="46" rx="6" fill="#7a2020" transform="rotate(6 24 66)"/>
-        <rect x="69" y="66" width="13" height="46" rx="6" fill="#7a2020" transform="rotate(-4 75 66)"/>
-        <g transform="translate(24,108)"><ellipse cx="0" cy="1" rx="10" ry="8.5" fill="#c81f2c" stroke="#7a0f16" stroke-width="1.2"/><rect x="-7" y="7" width="14" height="6" rx="2.5" fill="#111"/><path d="M-6 -2 Q0 -8 6 -2" stroke="#8f1520" stroke-width="1.4" fill="none" opacity="0.7"/><ellipse cx="-3" cy="-2.5" rx="3.4" ry="2.6" fill="#e6545f" opacity="0.55"/></g>
-        <g transform="translate(78,104)"><ellipse cx="0" cy="1" rx="10" ry="8.5" fill="#c81f2c" stroke="#7a0f16" stroke-width="1.2"/><rect x="-7" y="7" width="14" height="6" rx="2.5" fill="#111"/><path d="M-6 -2 Q0 -8 6 -2" stroke="#8f1520" stroke-width="1.4" fill="none" opacity="0.7"/><ellipse cx="-3" cy="-2.5" rx="3.4" ry="2.6" fill="#e6545f" opacity="0.55"/></g>
-        <circle cx="50" cy="34" r="24" fill="#c98a5e"/>
-        <circle cx="43" cy="32" r="3" fill="#1a1a1a"/>
-        <circle cx="57" cy="32" r="3" fill="#1a1a1a"/>
-      </svg>
-      <button class="fin-btn" id="finBtnO">ДОБИТЬ</button>
-    </div>
-
   </div>
 
-  <div id="staminaWrap">
-    <div id="staminaLabel"><span>ВЫНОСЛИВОСТЬ</span><span id="staminaPct">100%</span></div>
-    <div id="staminaBar"><div id="staminaFill"></div></div>
+  <div id="hud">
+    <div class="zone-bars">
+      <div class="zone-label"><span class="zone-name">Голова</span><div class="zone-bar"><div id="head0" class="zone-fill" style="width:100%"></div></div></div>
+      <div class="zone-label"><span class="zone-name">Тело</span><div class="zone-bar"><div id="body0" class="zone-fill" style="width:100%"></div></div></div>
+      <div class="zone-label"><span class="zone-name">Ноги</span><div class="zone-bar"><div id="legs0" class="zone-fill" style="width:100%"></div></div></div>
+      <div class="stamina-bar"><div id="st0" class="stamina-fill" style="width:100%"></div></div>
+    </div>
+    <div class="zone-bars right">
+      <div class="zone-label"><span class="zone-name">Голова</span><div class="zone-bar"><div id="head1" class="zone-fill" style="width:100%"></div></div></div>
+      <div class="zone-label"><span class="zone-name">Тело</span><div class="zone-bar"><div id="body1" class="zone-fill" style="width:100%"></div></div></div>
+      <div class="zone-label"><span class="zone-name">Ноги</span><div class="zone-bar"><div id="legs1" class="zone-fill" style="width:100%"></div></div></div>
+      <div class="stamina-bar"><div id="st1" class="stamina-fill" style="width:100%"></div></div>
+    </div>
   </div>
+  <div id="win-counters">
+    <div>Победы: <span id="wins0">0</span></div>
+    <div>Победы: <span id="wins1">0</span></div>
+  </div>
+
+  <div id="arena-wrap">
+    <canvas id="arena"></canvas>
+    <div id="ko-screen">
+      <div id="ko-title">НОКАУТ</div>
+      <div id="ko-sub"></div>
+      <button id="rematch-btn">Играть снова</button>
+    </div>
+  </div>
+  <div id="status"></div>
 
   <div id="controls">
-    <div id="joystick"><div class="knob"></div></div>
-    <div id="diamond">
-      <button class="db" id="btnHeavy">💥<span>ТЯЖЁЛЫЙ</span></button>
-      <button class="db" id="btnHook">🥊<span>ХУК</span></button>
-      <button class="db" id="btnJab">👊<span>ДЖЕБ</span></button>
-      <button class="db" id="btnKick">🦵<span>КИК</span></button>
+    <div id="move-row">
+      <div id="joystick-zone"><div id="joystick-knob"></div></div>
+    </div>
+    <div id="action-row">
+      <div id="leg-btn" class="zone-btn">НОГА</div>
+      <div id="body-btn" class="zone-btn">ТЕЛО</div>
+      <div id="head-btn" class="zone-btn">ГОЛОВА</div>
+      <div id="block-btn">БЛОК</div>
     </div>
   </div>
 
-</div>
-
-<script>
-// ===================== STATE =====================
-const oz = { head:100, body:100, legs:100 };
-const ozCum = { head:0, body:0, legs:0 };
-const pz = { head:100, body:100, legs:100 };
-const pzCum = { head:0, body:0, legs:0 };
-
-let oBroken=false, oDying=false, oKnockdown=false;
-let pBroken=false, pDying=false, pKnockdown=false;
-let victories=0, losses=0, round=1;
-let stamina=100;
-let combo=0, lastHitAt=0;
-let roundActive=false;
-let botTimer=null;
-
-let mode = 'offline';
-let roomKey = null, myRole = null, oppRole = null;
-let onlinePoll = null;
-let lastKnownState = null;
-const STORAGE_OK = (typeof window.storage !== 'undefined');
-
-const fillEls = { head:document.getElementById('o-head'), body:document.getElementById('o-body'), legs:document.getElementById('o-legs') };
-const pFillEls = { head:document.getElementById('p-head'), body:document.getElementById('p-body'), legs:document.getElementById('p-legs') };
-const bruiseEls = { head:document.getElementById('br-head'), body:document.getElementById('br-body'), legs:document.getElementById('br-legs') };
-const pBruiseEls = { head:document.getElementById('br-p-head'), body:document.getElementById('br-p-body'), legs:document.getElementById('br-p-legs') };
-const opponentEl = document.getElementById('opponent');
-const playerEl = document.getElementById('player');
-const stageEl = document.getElementById('stage');
-const finBtn = document.getElementById('finBtnO');
-const statusMsg = document.getElementById('statusMsg');
-const victoryCountEl = document.getElementById('victoryCount');
-const lossCountEl = document.getElementById('lossCount');
-const comboEl = document.getElementById('comboText');
-const dmgLayer = document.getElementById('dmgLayer');
-const staminaFill = document.getElementById('staminaFill');
-const staminaPct = document.getElementById('staminaPct');
-const tiredTag = document.getElementById('tiredTag');
-const modeTag = document.getElementById('modeTag');
-const oppNameEl = document.getElementById('oppName');
-const menuEl = document.getElementById('menu');
-
-const btnHeavy = document.getElementById('btnHeavy');
-const btnHook = document.getElementById('btnHook');
-const btnJab = document.getElementById('btnJab');
-const btnKick = document.getElementById('btnKick');
-const allBtns = [btnHeavy, btnHook, btnJab, btnKick];
-
-document.getElementById('closeBtn').addEventListener('click', ()=>{ returnToMenu(); });
-
-document.getElementById('pickOffline').addEventListener('click', ()=>{
-  mode = 'offline';
-  modeTag.textContent = 'Оффлайн · бой с ботом';
-  oppNameEl.textContent = 'Соперник';
-  menuEl.style.display = 'none';
-  beginMatch();
-});
-document.getElementById('pickOnline').addEventListener('click', ()=>{
-  if(!STORAGE_OK){
-    document.getElementById('onlineStatus').textContent = 'Онлайн недоступен в этом окне — используй оффлайн.';
-    return;
-  }
-  document.getElementById('onlinePanel').style.display = 'flex';
-});
-document.getElementById('backToMenu').addEventListener('click', ()=>{
-  document.getElementById('onlinePanel').style.display = 'none';
-  document.getElementById('onlineStatus').textContent = '';
-});
-document.getElementById('createRoom').addEventListener('click', async ()=>{
-  const code = (document.getElementById('roomInput').value.trim().toUpperCase()) || Math.random().toString(36).slice(2,6).toUpperCase();
-  document.getElementById('roomInput').value = code;
-  await hostRoom(code);
-});
-document.getElementById('joinRoom').addEventListener('click', async ()=>{
-  const code = document.getElementById('roomInput').value.trim().toUpperCase();
-  if(!code){ document.getElementById('onlineStatus').textContent = 'Введи код комнаты'; return; }
-  await joinRoom(code);
-});
-
-function freshMatchState(){
-  return {
-    a: { head:100, body:100, legs:100, broken:false, joined:true },
-    b: { head:100, body:100, legs:100, broken:false, joined:false },
-    finished:null, round:1, updatedAt: Date.now()
-  };
-}
-
-async function hostRoom(code){
-  const st = document.getElementById('onlineStatus');
-  st.textContent = 'Создаём комнату...';
-  try{
-    const state = freshMatchState();
-    await window.storage.set('duel:'+code, JSON.stringify(state), true);
-    roomKey = 'duel:'+code; myRole='a'; oppRole='b';
-    lastKnownState = state;
-    st.textContent = 'Комната ' + code + ' создана. Жду соперника...';
-    waitForOpponent();
-  }catch(e){ st.textContent = 'Ошибка хранилища, попробуй оффлайн.'; }
-}
-
-async function joinRoom(code){
-  const st = document.getElementById('onlineStatus');
-  st.textContent = 'Подключаемся...';
-  try{
-    const res = await window.storage.get('duel:'+code, true);
-    if(!res){ st.textContent = 'Комната не найдена.'; return; }
-    const state = JSON.parse(res.value);
-    if(state.b.joined){ st.textContent = 'Комната уже занята.'; return; }
-    state.b.joined = true;
-    state.updatedAt = Date.now();
-    await window.storage.set('duel:'+code, JSON.stringify(state), true);
-    roomKey = 'duel:'+code; myRole='b'; oppRole='a';
-    lastKnownState = state;
-    st.textContent = 'Подключено! Бой начинается...';
-    mode = 'online';
-    modeTag.textContent = 'Онлайн · комната ' + code;
-    oppNameEl.textContent = 'Игрок ' + oppRole.toUpperCase();
-    menuEl.style.display = 'none';
-    beginMatch();
-  }catch(e){ st.textContent = 'Ошибка хранилища, попробуй оффлайн.'; }
-}
-
-function waitForOpponent(){
-  const code = roomKey.replace('duel:','');
-  const st = document.getElementById('onlineStatus');
-  const iv = setInterval(async ()=>{
-    try{
-      const res = await window.storage.get(roomKey, true);
-      if(!res) return;
-      const state = JSON.parse(res.value);
-      if(state.b.joined){
-        clearInterval(iv);
-        lastKnownState = state;
-        st.textContent = 'Соперник подключился!';
-        mode = 'online';
-        modeTag.textContent = 'Онлайн · комната ' + code;
-        oppNameEl.textContent = 'Игрок B';
-        setTimeout(()=>{ menuEl.style.display = 'none'; beginMatch(); }, 500);
-      }
-    }catch(e){}
-  }, 1500);
-}
-
-function returnToMenu(){
-  clearTimeout(botTimer);
-  clearInterval(onlinePoll);
-  menuEl.style.display = 'flex';
-  document.getElementById('onlinePanel').style.display = 'none';
-  document.getElementById('onlineStatus').textContent = '';
-  roomKey = null; myRole = null; oppRole = null;
-}
-
-const canvas = document.getElementById('bloodCanvas');
-const ctx = canvas.getContext('2d');
-function resizeCanvas(){ canvas.width = stageEl.clientWidth; canvas.height = stageEl.clientHeight; }
-resizeCanvas();
-window.addEventListener('resize', resizeCanvas);
-
-let particles = [], pools = [];
-function spawnBlood(xRatio,yRatio,count){
-  const x = xRatio*canvas.width, y = yRatio*canvas.height;
-  for(let i=0;i<count;i++){
-    const a = Math.random()*Math.PI*2, sp = 2+Math.random()*6;
-    particles.push({x,y, vx:Math.cos(a)*sp, vy:Math.sin(a)*sp-3, r:1.5+Math.random()*3, life:1, decay:0.012+Math.random()*0.012});
-  }
-}
-function spawnPool(xRatio,yRatio,size){ pools.push({x:xRatio*canvas.width, y:yRatio*canvas.height, r:2, maxR:size, grow:0.6}); }
-
-function animate(){
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  pools.forEach(p=>{
-    if(p.r<p.maxR) p.r+=p.grow;
-    ctx.beginPath(); ctx.ellipse(p.x,p.y,p.r,p.r*0.4,0,0,Math.PI*2);
-    ctx.fillStyle='rgba(90,10,14,0.65)'; ctx.fill();
-  });
-  particles.forEach(p=>{
-    p.vy += 0.25; p.x += p.vx; p.y += p.vy; p.life -= p.decay;
-    ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
-    ctx.fillStyle = `rgba(${190+Math.random()*30|0},${10+Math.random()*15|0},${20+Math.random()*10|0},${Math.max(p.life,0)})`;
-    ctx.fill();
-  });
-  particles = particles.filter(p=>p.life>0 && p.y<canvas.height+20);
-  requestAnimationFrame(animate);
-}
-animate();
-
-const zoneYRatio = { head:0.30, body:0.52, legs:0.72 };
-const OPP_X = 0.88, PLAYER_X = 0.12;
-
-const ATTACKS = {
-  jab:   { zone:'head', dmg:[8,14],  stamina:10, heavy:false },
-  hook:  { zone:'head', dmg:[16,24], stamina:20, heavy:true  },
-  kick:  { zone:'legs', dmg:[14,22], stamina:18, heavy:false },
-  heavy: { zone:'body', dmg:[22,32], stamina:28, heavy:true  }
-};
-const BOT_KEYS = ['jab','hook','kick','heavy'];
-
-function updateOBars(){ Object.keys(oz).forEach(z=>{ fillEls[z].style.transform = `scaleX(${Math.max(oz[z],0)/100})`; }); }
-function updatePBars(){ Object.keys(pz).forEach(z=>{ pFillEls[z].style.transform = `scaleX(${Math.max(pz[z],0)/100})`; }); }
-
-function updateStaminaUI(){
-  stamina = Math.max(0, Math.min(100, stamina));
-  staminaFill.style.width = stamina + '%';
-  staminaPct.textContent = Math.round(stamina) + '%';
-  staminaFill.classList.toggle('low', stamina < 35);
-  tiredTag.classList.toggle('show', stamina < 35);
-  refreshButtons();
-}
-function refreshButtons(){
-  const busy = oBroken || oDying || oKnockdown || pBroken || pDying || pKnockdown || !roundActive;
-  const map = { btnHeavy:'heavy', btnHook:'hook', btnJab:'jab', btnKick:'kick' };
-  allBtns.forEach(b=>{
-    const cost = ATTACKS[map[b.id]].stamina;
-    b.disabled = busy || stamina < cost;
-  });
-}
-setInterval(()=>{ if(stamina<100 && roundActive){ stamina += 1.2; updateStaminaUI(); } }, 150);
-
-function setStatus(t, lose){ statusMsg.textContent = t; statusMsg.style.opacity = t ? 1 : 0; statusMsg.classList.toggle('lose', !!lose); }
-function flashHit(el, cls){ el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls); }
-function shake(hard){ stageEl.classList.remove('shake','shake-hard'); void stageEl.offsetWidth; stageEl.classList.add(hard ? 'shake-hard' : 'shake'); }
-function popDamage(xRatio, yRatio, text, cls){
-  const el = document.createElement('div');
-  el.className = 'dmg-pop' + (cls ? ' '+cls : '');
-  el.textContent = text;
-  el.style.left = (xRatio*100) + '%'; el.style.top = (yRatio*100) + '%';
-  dmgLayer.appendChild(el);
-  setTimeout(()=> el.remove(), 780);
-}
-function updateBruises(cumObj, els){
-  Object.keys(cumObj).forEach(z=>{
-    const op = Math.min(cumObj[z]/110, 0.85);
-    els[z].style.opacity = op;
-    els[z].classList.toggle('dripping', cumObj[z] > 42);
-  });
-}
-function showCombo(){
-  comboEl.textContent = 'КОМБО x' + combo;
-  comboEl.classList.add('show');
-  clearTimeout(showCombo._t);
-  showCombo._t = setTimeout(()=> comboEl.classList.remove('show'), 900);
-}
-
-function beginMatch(){
-  victories=0; losses=0; round=1;
-  victoryCountEl.textContent=0; lossCountEl.textContent=0;
-  startRound();
-}
-
-function oKnockdownSequence(){
-  oKnockdown = true; refreshButtons();
-  opponentEl.classList.add('knockdown'); shake(true); setStatus('НОКДАУН!');
-  setTimeout(()=>{
-    opponentEl.classList.remove('knockdown'); opponentEl.classList.add('broken');
-    oBroken = true; finBtn.classList.add('show');
-    setStatus('Соперник сломлен! Добейте его.');
-  }, 650);
-}
-function checkOKnockdown(){ if(!oBroken && !oKnockdown && (oz.head<=0||oz.body<=0||oz.legs<=0)) oKnockdownSequence(); }
-
-function pKnockdownSequence(){
-  pKnockdown = true; refreshButtons();
-  playerEl.classList.add('knockdown'); shake(true); setStatus('ВЫ В НОКДАУНЕ!', true);
-  setTimeout(()=>{
-    playerEl.classList.remove('knockdown'); playerEl.classList.add('broken');
-    pBroken = true; setStatus('Соперник добивает вас...', true);
-    setTimeout(finishPlayerOffline, 900);
-  }, 650);
-}
-function checkPKnockdown(){ if(!pBroken && !pKnockdown && (pz.head<=0||pz.body<=0||pz.legs<=0)) pKnockdownSequence(); }
-function finishPlayerOffline(){
-  pDying = true;
-  spawnBlood(PLAYER_X, 0.5, 70); spawnPool(PLAYER_X, 0.86, 46); shake(true);
-  playerEl.classList.add('dying'); losses++; lossCountEl.textContent = losses;
-  setStatus('Поражение!', true);
-  setTimeout(startRound, 1100);
-}
-function botAttackOnce(){
-  if(!roundActive||oBroken||oDying||oKnockdown||pBroken||pDying||pKnockdown) return;
-  const key = BOT_KEYS[Math.floor(Math.random()*BOT_KEYS.length)];
-  const cfg = ATTACKS[key]; const yPos = zoneYRatio[cfg.zone];
-  if(Math.random() < 0.15){ popDamage(PLAYER_X, yPos, 'БЛОК!', 'block'); return; }
-  let dmg = Math.round(cfg.dmg[0] + Math.random()*(cfg.dmg[1]-cfg.dmg[0]));
-  pz[cfg.zone] = Math.max(0, pz[cfg.zone]-dmg); pzCum[cfg.zone] += dmg;
-  updatePBars(); updateBruises(pzCum, pBruiseEls);
-  flashHit(playerEl,'hit'); shake(cfg.heavy);
-  spawnBlood(PLAYER_X, yPos + (Math.random()-0.5)*0.03, cfg.heavy ? 18 : 10);
-  popDamage(PLAYER_X, yPos, '-'+dmg, 'enemy');
-  checkPKnockdown();
-}
-function scheduleBotAttack(){
-  clearTimeout(botTimer);
-  botTimer = setTimeout(()=>{
-    if(mode==='offline' && roundActive && !oBroken && !oDying && !oKnockdown && !pBroken && !pDying && !pKnockdown) botAttackOnce();
-    if(mode==='offline' && roundActive) scheduleBotAttack();
-  }, 1500 + Math.random()*1800);
-}
-
-function doAttack(key){
-  const cfg = ATTACKS[key];
-  if(oBroken||oDying||oKnockdown||pBroken||pDying||pKnockdown||!roundActive) return;
-  if(stamina < cfg.stamina){ setStatus('Не хватает выносливости!'); setTimeout(()=>{ if(roundActive) setStatus(''); },700); return; }
-
-  stamina -= cfg.stamina; updateStaminaUI();
-  const now = Date.now();
-  combo = (now - lastHitAt < 1000) ? combo+1 : 1;
-  lastHitAt = now;
-  const yPos = zoneYRatio[cfg.zone];
-
-  if(Math.random() < 0.12){
-    popDamage(OPP_X, yPos, 'БЛОК!', 'block');
-    setStatus('Соперник заблокировал удар');
-    setTimeout(()=>{ if(roundActive) setStatus(''); },600);
-    return;
-  }
-  const fatigue = stamina < 35 ? 0.75 : 1;
-  let dmg = Math.round((cfg.dmg[0] + Math.random()*(cfg.dmg[1]-cfg.dmg[0])) * fatigue);
-  if(combo >= 3) dmg = Math.round(dmg * 1.15);
-
-  oz[cfg.zone] = Math.max(0, oz[cfg.zone]-dmg); ozCum[cfg.zone] += dmg;
-  updateOBars(); updateBruises(ozCum, bruiseEls);
-  flashHit(opponentEl,'hit'); shake(cfg.heavy);
-  spawnBlood(OPP_X, yPos + (Math.random()-0.5)*0.03, cfg.heavy ? 18 : 10);
-  popDamage(OPP_X, yPos, '-'+dmg, '');
-  if(combo >= 2) showCombo();
-  setStatus('');
-
-  if(mode==='online'){ pushOnlineAttack(cfg.zone, dmg); }
-  else { checkOKnockdown(); }
-}
-
-btnHeavy.addEventListener('click', ()=> doAttack('heavy'));
-btnHook.addEventListener('click', ()=> doAttack('hook'));
-btnJab.addEventListener('click', ()=> doAttack('jab'));
-btnKick.addEventListener('click', ()=> doAttack('kick'));
-
-finBtn.addEventListener('click', ()=>{
-  if(mode==='online'){ finishOnline(); return; }
-  if(!oBroken||oDying) return;
-  oDying = true; clearTimeout(botTimer); finBtn.classList.remove('show');
-  spawnBlood(OPP_X, 0.5, 70); spawnPool(OPP_X, 0.86, 46); shake(true);
-  opponentEl.classList.add('dying'); victories++; victoryCountEl.textContent = victories;
-  setStatus('Победа нокаутом!');
-  setTimeout(startRound, 1000);
-});
-
-async function pushOnlineAttack(zone, dmg){
-  try{
-    const res = await window.storage.get(roomKey, true);
-    const state = JSON.parse(res.value);
-    const opp = state[oppRole];
-    opp[zone] = Math.max(0, opp[zone] - dmg);
-    if(!opp.broken && (opp.head<=0||opp.body<=0||opp.legs<=0)) opp.broken = true;
-    state.updatedAt = Date.now();
-    await window.storage.set(roomKey, JSON.stringify(state), true);
-    lastKnownState = state;
-  }catch(e){}
-}
-async function finishOnline(){
-  if(!oBroken || oDying) return;
-  try{
-    oDying = true; finBtn.classList.remove('show');
-    spawnBlood(OPP_X, 0.5, 70); spawnPool(OPP_X, 0.86, 46); shake(true);
-    opponentEl.classList.add('dying'); victories++; victoryCountEl.textContent = victories;
-    setStatus('Победа нокаутом!');
-    const res = await window.storage.get(roomKey, true);
-    const state = JSON.parse(res.value);
-    state.finished = myRole;
-    state.updatedAt = Date.now();
-    await window.storage.set(roomKey, JSON.stringify(state), true);
-    lastKnownState = state;
-    setTimeout(()=>{ if(myRole==='a') resetOnlineRound(); }, 1200);
-  }catch(e){}
-}
-async function resetOnlineRound(){
-  try{
-    const fresh = freshMatchState();
-    fresh.a.joined = true; fresh.b.joined = true; fresh.round = round+1;
-    await window.storage.set(roomKey, JSON.stringify(fresh), true);
-  }catch(e){}
-}
-
-function startOnlinePolling(){
-  clearInterval(onlinePoll);
-  onlinePoll = setInterval(async ()=>{
-    if(mode!=='online' || !roomKey) return;
-    try{
-      const res = await window.storage.get(roomKey, true);
-      if(!res) return;
-      const state = JSON.parse(res.value);
-      if(!lastKnownState || state.updatedAt !== lastKnownState.updatedAt){
-        applyOnlineState(state);
-        lastKnownState = state;
-      }
-    }catch(e){}
-  }, 900);
-}
-
-function applyOnlineState(state){
-  const me = state[myRole], opp = state[oppRole];
-
-  ['head','body','legs'].forEach(z=>{
-    if(pz[z] !== me[z]){
-      if(me[z] < pz[z]){
-        const dmg = pz[z]-me[z];
-        pzCum[z]+=dmg; flashHit(playerEl,'hit'); shake(dmg>18);
-        spawnBlood(PLAYER_X, zoneYRatio[z], dmg>18?18:10);
-        popDamage(PLAYER_X, zoneYRatio[z], '-'+dmg, 'enemy');
-      }
-      pz[z] = me[z];
-    }
-    if(oz[z] !== opp[z]){ oz[z] = opp[z]; }
-  });
-  updatePBars(); updateOBars(); updateBruises(pzCum, pBruiseEls);
-
-  if(me.broken && !pBroken && !pDying){
-    pBroken = true; playerEl.classList.add('broken'); refreshButtons();
-    setStatus('Вы сломлены! Соперник может добить.', true);
-  }
-  if(opp.broken && !oBroken && !oDying){
-    oBroken = true; opponentEl.classList.add('broken'); finBtn.classList.add('show'); refreshButtons();
-    setStatus('Соперник сломлен! Добейте его.');
-  }
-
-  if(state.finished && !pDying && !oDying){
-    if(state.finished !== myRole){
-      pDying = true;
-      spawnBlood(PLAYER_X, 0.5, 70); spawnPool(PLAYER_X, 0.86, 46); shake(true);
-      playerEl.classList.add('dying'); losses++; lossCountEl.textContent = losses;
-      setStatus('Поражение!', true);
-    }
-    roundActive = false;
-  }
-
-  if(state.round !== round && !state.finished){
-    round = state.round;
-    oz.head=100; oz.body=100; oz.legs=100; ozCum.head=0; ozCum.body=0; ozCum.legs=0;
-    pz.head=100; pz.body=100; pz.legs=100; pzCum.head=0; pzCum.body=0; pzCum.legs=0;
-    oBroken=false; oDying=false; oKnockdown=false;
-    pBroken=false; pDying=false; pKnockdown=false;
-    combo=0;
-    opponentEl.classList.remove('dying','broken'); playerEl.classList.remove('dying','broken');
-    updateOBars(); updatePBars(); updateBruises(ozCum, bruiseEls); updateBruises(pzCum, pBruiseEls);
-    stamina=100; updateStaminaUI();
-    setStatus('Раунд ' + round);
-    roundActive = true;
-    setTimeout(()=>{ if(roundActive) setStatus(''); }, 1100);
-  }
-}
-
-function startRound(){
-  round++;
-  oz.head=100; oz.body=100; oz.legs=100; ozCum.head=0; ozCum.body=0; ozCum.legs=0;
-  pz.head=100; pz.body=100; pz.legs=100; pzCum.head=0; pzCum.body=0; pzCum.legs=0;
-  oBroken=false; oDying=false; oKnockdown=false;
-  pBroken=false; pDying=false; pKnockdown=false;
-  combo=0;
-  opponentEl.classList.remove('dying','broken'); playerEl.classList.remove('dying','broken');
-  updateOBars(); updatePBars(); updateBruises(ozCum, bruiseEls); updateBruises(pzCum, pBruiseEls);
-  stamina = 100; updateStaminaUI();
-  roundActive = false;
-  setStatus('Раунд ' + round);
-  setTimeout(()=>{
-    setStatus('');
-    roundActive = true;
-    refreshButtons();
-    if(mode==='offline') scheduleBotAttack();
-    else startOnlinePolling();
-  }, 1100);
-}
-</script>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="game.js"></script>
 </body>
 </html>
