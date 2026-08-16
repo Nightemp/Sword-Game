@@ -1,4 +1,3 @@
-cat > /mnt/user-data/outputs/server.js << 'SRVEOF'
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -24,73 +23,27 @@ const ARENA_WIDTH = 800;
 const rooms = new Map();
 let totalGamesPlayed = 0;
 
-const MOVES = {
-  head:        { range: 100, cost: 12, dmg: 10, cooldown: 250, part: 'head',  blood: 8  },
-  torso:       { range: 85,  cost: 18, dmg: 14, cooldown: 350, part: 'torso', blood: 8  },
-  legs:        { range: 65,  cost: 24, dmg: 20, cooldown: 500, part: 'legs',  blood: 8  },
-  power_punch: { range: 95,  cost: 40, dmg: 26, cooldown: 700, part: 'head',  blood: 16 },
-  power_kick:  { range: 80,  cost: 45, dmg: 32, cooldown: 900, part: 'head',  blood: 18 },
-};
-const TORSO_CRIT_CHANCE = 0.15;
-const TORSO_CRIT_BONUS = 10;
-const STAMINA_REGEN = 4;
-const STAMINA_REFUND_ON_HIT = 6;
-const REGEN_INTERVAL = 200;
-const BLOOD_STOP_THRESHOLD = 100;
-
-function newPlayerState(slot) {
+function freshPlayerState(slot, wins) {
   return {
     x: slot === 0 ? 150 : ARENA_WIDTH - 150,
     facing: slot === 0 ? 1 : -1,
-    parts: { head: 100, torso: 100, legs: 100 },
+    head: 100,
+    body: 100,
+    legs: 100,
     stamina: 100,
+    wins: wins || 0,
     attacking: false,
+    blocking: false,
+    knockedOut: false,
     slot,
   };
 }
 
-function moveSpeed(p) {
-  if (p.parts.legs <= 0) return 3;
-  if (p.parts.legs <= 40) return 6;
-  return 10;
-}
-
-function isAlive(p) {
-  return p.parts.head > 0 && p.parts.torso > 0;
-}
-
-function totalHealth(p) {
-  return p.parts.head + p.parts.torso + p.parts.legs;
-}
-
 function createRoom(roomId) {
   if (!rooms.has(roomId)) {
-    rooms.set(roomId, { players: {}, order: [], tickInterval: null, bloodLevel: 0, finished: false });
+    rooms.set(roomId, { players: {}, order: [], loopStarted: false });
   }
   return rooms.get(roomId);
-}
-
-function startRoomTick(roomId) {
-  const room = rooms.get(roomId);
-  if (!room || room.tickInterval) return;
-  room.tickInterval = setInterval(() => {
-    if (room.finished) return;
-    let changed = false;
-    Object.values(room.players).forEach((p) => {
-      if (p.stamina < 100) {
-        p.stamina = Math.min(100, p.stamina + STAMINA_REGEN);
-        changed = true;
-      }
-    });
-    if (changed) io.to(roomId).emit('state_update', room.players);
-  }, REGEN_INTERVAL);
-}
-
-function stopRoomTick(room) {
-  if (room.tickInterval) {
-    clearInterval(room.tickInterval);
-    room.tickInterval = null;
-  }
 }
 
 function broadcastStats() {
@@ -100,74 +53,21 @@ function broadcastStats() {
   });
 }
 
-function endFight(room, roomId, winnerSlot, reason) {
-  room.finished = true;
-  totalGamesPlayed += 1;
-  io.to(roomId).emit('game_over', { winnerSlot, reason });
-  broadcastStats();
-  stopRoomTick(room);
-}
-
-function resolveAttack(room, roomId, socket, type) {
-  if (room.finished) return;
-  const move = MOVES[type];
-  if (!move) return;
-  const attacker = room.players[socket.id];
-  if (!attacker || attacker.attacking || !isAlive(attacker)) return;
-
-  if (attacker.stamina < move.cost) {
-    socket.emit('too_tired');
-    return;
-  }
-  attacker.stamina -= move.cost;
-  attacker.attacking = true;
-  io.to(roomId).emit('attack_anim', { slot: attacker.slot, target: type });
-
-  const opponentId = room.order.find((id) => id !== socket.id);
-  let hitPart = null;
-  let endedReason = null;
-  let winnerSlot = null;
-
-  if (opponentId) {
-    const opponent = room.players[opponentId];
-    const dist = Math.abs(opponent.x - attacker.x);
-    const facingCorrect = (attacker.facing === 1 && opponent.x > attacker.x) ||
-                           (attacker.facing === -1 && opponent.x < attacker.x);
-
-    if (dist < move.range && facingCorrect && isAlive(opponent)) {
-      const part = move.part;
-      const prevLegs = opponent.parts.legs;
-      let dmg = move.dmg;
-      if (part === 'torso' && Math.random() < TORSO_CRIT_CHANCE) dmg += TORSO_CRIT_BONUS;
-      opponent.parts[part] = Math.max(0, opponent.parts[part] - dmg);
-      attacker.stamina = Math.min(100, attacker.stamina + STAMINA_REFUND_ON_HIT);
-      hitPart = part;
-      room.bloodLevel += move.blood;
-
-      if (part === 'legs' && prevLegs > 0 && opponent.parts.legs <= 0) {
-        endedReason = 'legs_broken';
-        winnerSlot = attacker.slot;
-      } else if (!isAlive(opponent)) {
-        endedReason = 'knockout';
-        winnerSlot = attacker.slot;
-      } else if (room.bloodLevel >= BLOOD_STOP_THRESHOLD) {
-        endedReason = 'blood';
-        winnerSlot = totalHealth(attacker) >= totalHealth(opponent) ? attacker.slot : opponent.slot;
+function startStaminaLoop(room, roomId) {
+  if (room.loopStarted) return;
+  room.loopStarted = true;
+  setInterval(() => {
+    let changed = false;
+    Object.values(room.players).forEach((p) => {
+      if (p.knockedOut) return;
+      const regenRate = p.blocking ? 0.4 : 0.8;
+      if (p.stamina < 100) {
+        p.stamina = Math.min(100, p.stamina + regenRate);
+        changed = true;
       }
-    }
-  }
-
-  io.to(roomId).emit('state_update', room.players);
-  if (hitPart && opponentId) {
-    io.to(roomId).emit('hit_landed', { targetSlot: room.players[opponentId].slot, part: hitPart });
-  }
-  if (endedReason) {
-    endFight(room, roomId, winnerSlot, endedReason);
-  }
-
-  setTimeout(() => {
-    if (attacker) attacker.attacking = false;
-  }, move.cooldown);
+    });
+    if (changed) io.to(roomId).emit('state_update', room.players);
+  }, 200);
 }
 
 io.on('connection', (socket) => {
@@ -187,7 +87,7 @@ io.on('connection', (socket) => {
       return;
     }
     const slot = room.order.length;
-    room.players[socket.id] = newPlayerState(slot);
+    room.players[socket.id] = freshPlayerState(slot);
     room.order.push(socket.id);
     socket.join(roomId);
     socket.data.roomId = roomId;
@@ -196,32 +96,116 @@ io.on('connection', (socket) => {
     socket.to(roomId).emit('opponent_joined', { slot, players: room.players });
 
     if (room.order.length === 2) {
-      room.finished = false;
-      room.bloodLevel = 0;
       io.to(roomId).emit('start_game', { players: room.players });
-      startRoomTick(roomId);
+      startStaminaLoop(room, roomId);
     }
   });
 
   socket.on('move', ({ dir }) => {
     const roomId = socket.data.roomId;
     const room = rooms.get(roomId);
-    if (!room || !room.players[socket.id] || room.finished) return;
+    if (!room || !room.players[socket.id]) return;
     const p = room.players[socket.id];
-    if (!isAlive(p)) return;
-    const speed = moveSpeed(p);
+    if (p.knockedOut) return;
+    const staminaFactor = 0.4 + 0.6 * (p.stamina / 100);
+    const legFactor = 0.25 + 0.75 * (p.legs / 100);
+    const speed = 10 * staminaFactor * legFactor;
     p.x += dir * speed;
     p.x = Math.max(20, Math.min(ARENA_WIDTH - 20, p.x));
     p.facing = dir !== 0 ? dir : p.facing;
     io.to(roomId).emit('state_update', room.players);
   });
 
-  socket.on('attack', ({ target }) => {
+  socket.on('block_start', () => {
+    const roomId = socket.data.roomId;
+    const room = rooms.get(roomId);
+    if (!room || !room.players[socket.id]) return;
+    const p = room.players[socket.id];
+    if (p.knockedOut || p.attacking) return;
+    p.blocking = true;
+    io.to(roomId).emit('state_update', room.players);
+  });
+
+  socket.on('block_end', () => {
+    const roomId = socket.data.roomId;
+    const room = rooms.get(roomId);
+    if (!room || !room.players[socket.id]) return;
+    room.players[socket.id].blocking = false;
+    io.to(roomId).emit('state_update', room.players);
+  });
+
+  socket.on('attack', ({ zone }) => {
+    const roomId = socket.data.roomId;
+    const room = rooms.get(roomId);
+    if (!room || !room.players[socket.id]) return;
+    const attacker = room.players[socket.id];
+    if (attacker.attacking || attacker.blocking || attacker.knockedOut) return;
+    const validZone = zone === 'leg' || zone === 'body' || zone === 'head' ? zone : 'body';
+    const STAMINA_COST = 16;
+    if (attacker.stamina < STAMINA_COST) {
+      socket.emit('attack_denied');
+      return;
+    }
+    attacker.stamina -= STAMINA_COST;
+    attacker.attacking = true;
+    io.to(roomId).emit('attack_anim', { slot: attacker.slot, zone: validZone });
+
+    const opponentId = room.order.find((id) => id !== socket.id);
+    let hit = false;
+    let blocked = false;
+    if (opponentId) {
+      const opponent = room.players[opponentId];
+      const dist = Math.abs(opponent.x - attacker.x);
+      const facingCorrect = (attacker.facing === 1 && opponent.x > attacker.x) ||
+                             (attacker.facing === -1 && opponent.x < attacker.x);
+      if (dist < 70 && facingCorrect && !opponent.knockedOut) {
+        if (opponent.blocking) {
+          blocked = true;
+          opponent.stamina = Math.max(0, opponent.stamina - 10);
+          opponent.x = Math.max(20, Math.min(ARENA_WIDTH - 20, opponent.x + attacker.facing * 6));
+        } else {
+          const dmg = validZone === 'leg' ? 9 : validZone === 'head' ? 11 : 14;
+          opponent[validZone] = Math.max(0, opponent[validZone] - dmg);
+          opponent.x = Math.max(20, Math.min(ARENA_WIDTH - 20, opponent.x + attacker.facing * 16));
+          hit = true;
+        }
+      }
+    }
+
+    io.to(roomId).emit('state_update', room.players);
+    if (hit) {
+      io.to(roomId).emit('hit_landed', { targetSlot: room.players[opponentId].slot, zone: validZone });
+    } else if (blocked) {
+      io.to(roomId).emit('block_landed', { targetSlot: room.players[opponentId].slot });
+    }
+
+    if (opponentId) {
+      const opp = room.players[opponentId];
+      const isDown = opp.head <= 0 || (opp.body <= 0 && opp.legs <= 0);
+      if (isDown && !opp.knockedOut) {
+        opp.knockedOut = true;
+        attacker.wins += 1;
+        totalGamesPlayed += 1;
+        io.to(roomId).emit('knockout', { winnerSlot: attacker.slot, loserSlot: opp.slot });
+        io.to(roomId).emit('state_update', room.players);
+        broadcastStats();
+      }
+    }
+
+    setTimeout(() => {
+      if (room.players[socket.id]) room.players[socket.id].attacking = false;
+    }, 300);
+  });
+
+  socket.on('rematch', () => {
     const roomId = socket.data.roomId;
     const room = rooms.get(roomId);
     if (!room) return;
-    if (!MOVES[target]) return;
-    resolveAttack(room, roomId, socket, target);
+    room.order.forEach((id) => {
+      const old = room.players[id];
+      room.players[id] = freshPlayerState(old.slot, old.wins);
+    });
+    io.to(roomId).emit('start_game', { players: room.players });
   });
 
   socket.on('disconnect', () => {
@@ -231,10 +215,7 @@ io.on('connection', (socket) => {
       delete room.players[socket.id];
       room.order = room.order.filter((id) => id !== socket.id);
       io.to(roomId).emit('opponent_left');
-      if (room.order.length === 0) {
-        stopRoomTick(room);
-        rooms.delete(roomId);
-      }
+      if (room.order.length === 0) rooms.delete(roomId);
     }
     broadcastStats();
   });
@@ -250,12 +231,22 @@ bot.start((ctx) => {
 
   ctx.reply(
     payload
-      ? '⚔️ Ты присоединяешься к бою! Жми кнопку ниже.'
-      : `⚔️ Бой создан! Отправь другу ссылку-приглашение:\n${inviteLink}\n\nКогда друг перейдёт по ней — начинайте бой.`,
+      ? '🥊 Ты присоединяешься к бою! Жми кнопку ниже.'
+      : `🥊 Бой создан! Отправь другу ссылку-приглашение:\n${inviteLink}\n\nКогда друг перейдёт по ней — начинайте бой.`,
     {
       reply_markup: {
-        inline_keyboard: [[{ text: '🗡 Открыть арену', web_app: { url: gameUrl } }]],
+        inline_keyboard: [[{ text: '🥊 Открыть арену', web_app: { url: gameUrl } }]],
       },
     }
   );
 });
+
+bot.launch();
+console.log('Бот запущен');
+
+server.listen(process.env.PORT || 3000, () => {
+  console.log('Сервер игры запущен');
+});
+
+process.once('SIGINT', () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
