@@ -43,9 +43,14 @@ const koSub = document.getElementById('ko-sub');
 
 let mySlot = null;
 let players = {};
-let attackFlashSlot = null;
+
+// у каждого бойца — своё независимое состояние атаки (исправляет "перенос" анимации)
+let attackActive = {};
 let attackTarget = {};
 let attackStartTime = {};
+let attackTimers = {};
+let hitStun = {};
+
 const prevX = {};
 const walkPhase = {};
 let particles = [];
@@ -87,6 +92,10 @@ socket.on('start_game', function (data) {
   koSlot = null;
   headHits = {};
   bloodPools = [];
+  hitStun = {};
+  attackActive = {};
+  Object.keys(attackTimers).forEach(function (k) { clearTimeout(attackTimers[k]); });
+  attackTimers = {};
   if (koOverlay) koOverlay.classList.remove('show');
 });
 socket.on('state_update', function (p) {
@@ -94,11 +103,13 @@ socket.on('state_update', function (p) {
   updateHpBars();
 });
 socket.on('attack_anim', function (data) {
-  attackFlashSlot = data.slot;
-  attackTarget[data.slot] = data.target;
-  attackStartTime[data.slot] = performance.now();
+  const slot = data.slot;
+  attackActive[slot] = true;
+  attackTarget[slot] = data.target;
+  attackStartTime[slot] = performance.now();
+  clearTimeout(attackTimers[slot]);
   const dur = (data.target === 'power_kick' || data.target === 'power_punch') ? 320 : 220;
-  setTimeout(function () { attackFlashSlot = null; }, dur);
+  attackTimers[slot] = setTimeout(function () { attackActive[slot] = false; }, dur);
 });
 socket.on('hit_landed', function (data) {
   const p = Object.values(players).find(function (pl) { return pl.slot === data.targetSlot; });
@@ -108,6 +119,7 @@ socket.on('hit_landed', function (data) {
     return;
   }
   shake = data.part === 'legs' ? 12 : 8;
+  hitStun[data.targetSlot] = { time: performance.now(), part: data.part };
   if (p) {
     spawnHitEffect(p, data.part);
     spawnArenaBlood(p, data.part);
@@ -342,7 +354,10 @@ function drawFighter(p, groundY, scale, isAttacking, swingT, target) {
   if (moving) walkPhase[p.slot] += 0.35;
   const legSwing = moving ? Math.sin(walkPhase[p.slot]) * 7 : 0;
   const armCounterSwing = moving ? -Math.sin(walkPhase[p.slot]) * 8 : 0;
-  const bob = moving ? Math.abs(Math.sin(walkPhase[p.slot])) * 3 : 0;
+  // при ходьбе — вертикальный перенос веса, в стойке — лёгкое дыхание/покачивание
+  const bob = moving
+    ? Math.abs(Math.sin(walkPhase[p.slot])) * 3
+    : Math.sin(performance.now() / 420 + p.slot * 3) * 1.2 + 1.2;
   const lean = moving ? p.facing * 1.5 : 0;
 
   const isNormalKick = isAttacking && target === 'legs';
@@ -361,8 +376,16 @@ function drawFighter(p, groundY, scale, isAttacking, swingT, target) {
     spinAngle = Math.sin(swingT * Math.PI) * Math.PI * 1.4 * p.facing;
   }
 
+  // реакция на попадание — короткий отшатывание назад
+  let knockback = 0;
+  const stun = hitStun[p.slot];
+  if (stun && performance.now() - stun.time < 260) {
+    const ease = 1 - (performance.now() - stun.time) / 260;
+    knockback = -p.facing * ease * (stun.part === 'legs' ? 3 : 7);
+  }
+
   ctx.save();
-  ctx.translate(x, y + fallLift);
+  ctx.translate(x + knockback, y + fallLift);
   ctx.rotate(lean * 0.02 + fallAngle + spinAngle);
   ctx.translate(-x, -y);
 
@@ -535,7 +558,7 @@ function draw() {
   drawArenaBackground(groundY);
 
   Object.values(players).forEach(function (p) {
-    const isAttacking = attackFlashSlot === p.slot;
+    const isAttacking = !!attackActive[p.slot];
     let swingT = 0;
     if (isAttacking && attackStartTime[p.slot]) {
       const dur = (attackTarget[p.slot] === 'power_kick' || attackTarget[p.slot] === 'power_punch') ? 320 : 220;
