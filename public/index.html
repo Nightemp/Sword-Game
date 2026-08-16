@@ -1,189 +1,356 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-<title>Кулачный бой</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Octagon Duel</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
   html, body {
-    margin: 0; padding: 0; height: 100%; overflow: hidden;
-    background: #060402; font-family: sans-serif; touch-action: none;
-    -webkit-user-select: none; user-select: none;
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    background: #0c0d12;
+    overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    color: #fff;
+    user-select: none;
+    touch-action: none;
   }
-  #arena-wrap { position: relative; width: 100%; height: 62vh; overflow: hidden; }
-  #arena { display: block; width: 100%; height: 100%; }
-  #hud { position: absolute; top: 8px; left: 0; right: 0; display: flex; justify-content: space-between; padding: 0 14px; z-index: 5; }
-  .zone-bars { width: 44%; }
-  .zone-bars.right { text-align: right; }
-  .zone-label { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
-  .zone-bars.right .zone-label { flex-direction: row-reverse; }
-  .zone-name { font-size: 9px; color: #ccc; width: 32px; }
-  .zone-bar { flex: 1; height: 8px; background: #1a1410; border-radius: 4px; overflow: hidden; border: 1px solid #000; }
-  .zone-fill { height: 100%; background: linear-gradient(#ff5f5f, #b8102a); transition: width 0.15s linear; }
-  .stamina-bar { height: 6px; background: #1a1410; border-radius: 3px; overflow: hidden; border: 1px solid #000; margin-top: 3px; }
-  .stamina-fill { height: 100%; background: linear-gradient(#7ed957, #2e8b3f); transition: width 0.15s linear; }
-  #win-counters { position: absolute; top: 72px; left: 0; right: 0; display: flex; justify-content: space-between; padding: 0 14px; z-index: 5; font-size: 11px; color: #ffe066; }
 
-  #controls {
-    position: fixed; bottom: 0; left: 0; right: 0; height: 38vh;
-    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
-    padding: 10px 14px; box-sizing: border-box; background: linear-gradient(#0c0906, #050302);
+  #arena {
+    display: block;
+    width: 100%;
+    height: 100%;
+    background: #14100e;
   }
-  #move-row { width: 100%; display: flex; justify-content: center; }
+
+  #status {
+    position: absolute;
+    top: 100px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 18px;
+    font-weight: bold;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.8);
+    pointer-events: none;
+    z-index: 3;
+  }
+
+  /* ---- HUD: полоски частей тела ---- */
+  .hp-group {
+    position: absolute;
+    top: 10px;
+    width: 38%;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    z-index: 3;
+  }
+  #hp-group-0 { left: 10px; }
+  #hp-group-1 { right: 10px; align-items: flex-end; }
+
+  .hp-row {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    gap: 5px;
+  }
+  #hp-group-1 .hp-row { flex-direction: row-reverse; }
+
+  .hp-label {
+    font-size: 10px;
+    font-weight: bold;
+    width: 12px;
+    text-align: center;
+    color: rgba(255,255,255,0.7);
+    text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+  }
+
+  .hp-container {
+    flex: 1;
+    height: 9px;
+    background: rgba(0,0,0,0.5);
+    border: 1.5px solid rgba(255,255,255,0.8);
+    border-radius: 5px;
+    overflow: hidden;
+  }
+
+  .hp-bar {
+    height: 100%;
+    width: 100%;
+    transition: width 0.15s ease-out;
+  }
+
+  .hp-head { background: #e0b88a; }
+  .hp-torso-0 { background: #4a7c59; }
+  .hp-torso-1 { background: #7c4a4a; }
+  .hp-legs { background: #6b5342; }
+
+  /* ---- Выносливость ---- */
+  #stamina-wrap {
+    position: absolute;
+    left: 24px;
+    bottom: 195px;
+    width: 130px;
+    height: 8px;
+    background: rgba(0,0,0,0.5);
+    border: 1.5px solid rgba(255,255,255,0.6);
+    border-radius: 4px;
+    overflow: hidden;
+    z-index: 3;
+  }
+  #stamina-bar {
+    height: 100%;
+    width: 100%;
+    background: linear-gradient(#ffe066, #d9a521);
+    transition: width 0.15s ease-out;
+  }
+
   #joystick-zone {
-    width: 110px; height: 110px; border-radius: 50%;
-    background: radial-gradient(circle, rgba(255,255,255,0.1), rgba(255,255,255,0.02));
-    position: relative; border: 1px solid rgba(255,255,255,0.15);
+    position: absolute;
+    left: 24px;
+    bottom: 50px;
+    width: 130px;
+    height: 130px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.15);
+    border: 2px solid rgba(255,255,255,0.3);
+    z-index: 3;
   }
   #joystick-knob {
-    width: 50px; height: 50px; border-radius: 50%;
-    background: radial-gradient(circle at 35% 30%, #fff, #999);
-    position: absolute; top: 30px; left: 30px; pointer-events: none;
-    box-shadow: 0 3px 8px rgba(0,0,0,0.5);
+    position: absolute;
+    left: 51px;
+    top: 51px;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.8);
   }
-  #action-row { display: flex; gap: 10px; align-items: center; justify-content: center; }
-  .zone-btn {
-    width: 78px; height: 78px; border-radius: 50%;
-    color: white; font-size: 12px; font-weight: bold; letter-spacing: 0.5px;
-    display: flex; align-items: center; justify-content: center;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.6); border: 3px solid;
+
+  /* ---- Кнопки ударов ---- */
+  #attack-controls {
+    position: absolute;
+    right: 16px;
+    bottom: 24px;
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    z-index: 3;
   }
-  #leg-btn { background: radial-gradient(circle at 35% 30%, #d68a3a, #7a4813 70%); border-color: #4a2c0c; }
-  #body-btn { background: radial-gradient(circle at 35% 30%, #e0c34a, #8a6f13 70%); border-color: #4a3c0c; }
-  #head-btn { background: radial-gradient(circle at 35% 30%, #ff5a5a, #a91d1d 70%); border-color: #6e1010; }
-  .zone-btn:active { filter: brightness(0.85); }
+
+  .atk-btn {
+    border-radius: 50%;
+    color: #fff;
+    font-size: 10px;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    transition: filter 0.1s, transform 0.1s;
+  }
+  .atk-btn:active { filter: brightness(0.8); transform: scale(0.95); }
+
+  #kick-btn {
+    width: 72px;
+    height: 72px;
+    background: rgba(255,170,60,0.32);
+    border: 2px solid rgba(255,190,100,0.6);
+  }
+
+  #hand-btn {
+    width: 80px;
+    height: 80px;
+    background: rgba(255,215,90,0.32);
+    border: 2px solid rgba(255,225,120,0.6);
+  }
+
+  #attack-btn {
+    width: 96px;
+    height: 96px;
+    background: rgba(255,80,80,0.32);
+    border: 2px solid rgba(255,120,120,0.6);
+  }
+
   #block-btn {
-    width: 62px; height: 62px; border-radius: 50%;
-    background: radial-gradient(circle at 35% 30%, #5a8fd6, #22447a 70%);
-    color: white; font-size: 11px; font-weight: bold;
-    border: 3px solid #14294a; display: flex; align-items: center; justify-content: center;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.6);
+    width: 72px;
+    height: 72px;
+    background: rgba(90,140,255,0.32);
+    border: 2px solid rgba(130,170,255,0.6);
   }
-  #block-btn.active { filter: brightness(1.3); }
-  #status { position: absolute; top: 38%; left: 0; right: 0; text-align: center; color: #ffe066; font-size: 22px; text-shadow: 0 2px 8px #000; z-index: 5; }
-
-  #ko-screen {
-    position: absolute; inset: 0; z-index: 40; display: none;
-    align-items: center; justify-content: center; flex-direction: column; gap: 16px;
-    background: rgba(0,0,0,0.55);
-  }
-  #ko-screen.show { display: flex; }
-  #ko-title { font-size: 30px; font-weight: bold; color: #ff3b3b; text-shadow: 0 3px 10px #000; letter-spacing: 2px; }
-  #ko-sub { color: #eee; font-size: 14px; }
-  #rematch-btn {
-    padding: 12px 36px; font-size: 15px; font-weight: bold; color: white;
-    background: linear-gradient(#ff5a5a, #a91d1d); border: 2px solid #6e1010;
-    border-radius: 12px;
+  #block-btn.active {
+    background: rgba(90,140,255,0.65);
+    box-shadow: 0 0 14px rgba(110,170,255,0.8);
   }
 
-  #menu-screen {
-    position: fixed; inset: 0; z-index: 50;
-    background: radial-gradient(ellipse at top, #3a2f28, #060402 80%);
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    color: #eee; text-align: center; gap: 18px;
+  #hold-hint {
+    position: absolute;
+    right: 16px;
+    bottom: 210px;
+    font-size: 11px;
+    color: rgba(255,255,255,0.55);
+    text-align: right;
+    z-index: 3;
+    max-width: 200px;
   }
-  #menu-screen h1 { font-size: 26px; margin: 0; letter-spacing: 1px; color: #ffe066; text-shadow: 0 2px 10px #000; }
-  #menu-stats { font-size: 14px; color: #ccc; display: flex; gap: 18px; }
-  #menu-stats span { color: #ffe066; font-weight: bold; }
+
+  #menu-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(#111318, #2a1414);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+  }
+
+  #menu-title {
+    font-size: 32px;
+    font-weight: bold;
+    letter-spacing: 1px;
+    margin-bottom: 6px;
+    text-shadow: 0 3px 6px rgba(0,0,0,0.6);
+  }
+
+  #menu-subtitle {
+    font-size: 14px;
+    color: rgba(255,255,255,0.6);
+    margin-bottom: 40px;
+    text-align: center;
+    padding: 0 30px;
+    line-height: 1.5;
+  }
+
   #play-btn {
-    padding: 16px 48px; font-size: 18px; font-weight: bold; color: white;
-    background: linear-gradient(#ff5a5a, #a91d1d); border: 2px solid #6e1010;
-    border-radius: 12px; box-shadow: 0 6px 16px rgba(0,0,0,0.5);
-  }
-  #settings-btn {
-    width: 44px; height: 44px; border-radius: 50%; background: rgba(255,255,255,0.1);
-    color: white; font-size: 20px; border: 1px solid rgba(255,255,255,0.2);
-    position: absolute; top: 20px; right: 20px; display: flex; align-items: center; justify-content: center;
+    width: 220px;
+    height: 60px;
+    border-radius: 30px;
+    background: linear-gradient(#ffe066, #e0a824);
+    border: none;
+    color: #1a1410;
+    font-size: 20px;
+    font-weight: bold;
+    letter-spacing: 1px;
+    box-shadow: 0 6px 16px rgba(0,0,0,0.4);
   }
 
-  #settings-modal {
-    position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,0.75);
-    display: none; align-items: center; justify-content: center;
+  #play-btn:active {
+    transform: scale(0.97);
   }
-  #settings-modal.open { display: flex; }
-  #settings-box {
-    background: #241c16; border: 1px solid #4a3a2c; border-radius: 14px;
-    padding: 22px; width: 82%; max-width: 340px; color: #eee;
+
+  #online-counter {
+    margin-top: 24px;
+    font-size: 13px;
+    color: rgba(255,255,255,0.5);
   }
-  #settings-box h2 { margin: 0 0 16px 0; font-size: 18px; color: #ffe066; }
-  .setting-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-top: 1px solid #3a2f28; }
-  .setting-row:first-of-type { border-top: none; }
-  .toggle { width: 46px; height: 26px; border-radius: 13px; background: #444; position: relative; flex-shrink: 0; }
-  .toggle.on { background: #d62828; }
-  .toggle-knob { width: 20px; height: 20px; border-radius: 50%; background: white; position: absolute; top: 3px; left: 3px; transition: left 0.15s; }
-  .toggle.on .toggle-knob { left: 23px; }
-  #close-settings { margin-top: 18px; width: 100%; padding: 10px; background: #4a3a2c; color: white; border: none; border-radius: 8px; }
+  #online-counter span {
+    color: #ffe066;
+    font-weight: bold;
+  }
+
+  /* ---- Экран нокаута ---- */
+  #ko-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 15;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    text-align: center;
+    background: radial-gradient(circle, rgba(120,0,0,0.55), rgba(0,0,0,0.9));
+  }
+  #ko-overlay.show { display: flex; }
+  #ko-text {
+    font-size: 42px;
+    font-weight: 900;
+    letter-spacing: 1px;
+    color: #ffdf5e;
+    text-shadow: 0 0 20px rgba(255,80,0,0.9), 0 4px 10px rgba(0,0,0,0.8);
+    animation: koPop 0.4s cubic-bezier(.2,1.4,.4,1);
+  }
+  #ko-sub {
+    margin-top: 10px;
+    font-size: 16px;
+    color: #fff;
+    text-shadow: 0 2px 6px #000;
+  }
+  @keyframes koPop {
+    from { transform: scale(0.4); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+  }
 </style>
 </head>
 <body>
-  <div id="menu-screen">
-    <button id="settings-btn">⚙️</button>
-    <h1>🥊 Кулачный бой</h1>
-    <div id="menu-stats">
-      <div>Онлайн: <span id="stat-online">—</span></div>
-      <div>Сыграно боёв: <span id="stat-games">—</span></div>
-    </div>
-    <button id="play-btn">Играть</button>
-  </div>
 
-  <div id="settings-modal">
-    <div id="settings-box">
-      <h2>Настройки</h2>
-      <div class="setting-row">
-        <span>Звук</span>
-        <div class="toggle on" id="toggle-sound"><div class="toggle-knob"></div></div>
-      </div>
-      <div class="setting-row">
-        <span>Расчленёнка</span>
-        <div class="toggle" id="toggle-gore"><div class="toggle-knob"></div></div>
-      </div>
-      <button id="close-settings">Закрыть</button>
-    </div>
-  </div>
+<canvas id="arena"></canvas>
+<div id="status"></div>
 
-  <div id="hud">
-    <div class="zone-bars">
-      <div class="zone-label"><span class="zone-name">Голова</span><div class="zone-bar"><div id="head0" class="zone-fill" style="width:100%"></div></div></div>
-      <div class="zone-label"><span class="zone-name">Тело</span><div class="zone-bar"><div id="body0" class="zone-fill" style="width:100%"></div></div></div>
-      <div class="zone-label"><span class="zone-name">Ноги</span><div class="zone-bar"><div id="legs0" class="zone-fill" style="width:100%"></div></div></div>
-      <div class="stamina-bar"><div id="st0" class="stamina-fill" style="width:100%"></div></div>
-    </div>
-    <div class="zone-bars right">
-      <div class="zone-label"><span class="zone-name">Голова</span><div class="zone-bar"><div id="head1" class="zone-fill" style="width:100%"></div></div></div>
-      <div class="zone-label"><span class="zone-name">Тело</span><div class="zone-bar"><div id="body1" class="zone-fill" style="width:100%"></div></div></div>
-      <div class="zone-label"><span class="zone-name">Ноги</span><div class="zone-bar"><div id="legs1" class="zone-fill" style="width:100%"></div></div></div>
-      <div class="stamina-bar"><div id="st1" class="stamina-fill" style="width:100%"></div></div>
-    </div>
+<div class="hp-group" id="hp-group-0">
+  <div class="hp-row">
+    <span class="hp-label">Г</span>
+    <div class="hp-container"><div class="hp-bar hp-head" id="hp0-head"></div></div>
   </div>
-  <div id="win-counters">
-    <div>Победы: <span id="wins0">0</span></div>
-    <div>Победы: <span id="wins1">0</span></div>
+  <div class="hp-row">
+    <span class="hp-label">Т</span>
+    <div class="hp-container"><div class="hp-bar hp-torso-0" id="hp0-torso"></div></div>
   </div>
+  <div class="hp-row">
+    <span class="hp-label">Н</span>
+    <div class="hp-container"><div class="hp-bar hp-legs" id="hp0-legs"></div></div>
+  </div>
+</div>
 
-  <div id="arena-wrap">
-    <canvas id="arena"></canvas>
-    <div id="ko-screen">
-      <div id="ko-title">НОКАУТ</div>
-      <div id="ko-sub"></div>
-      <button id="rematch-btn">Играть снова</button>
-    </div>
+<div class="hp-group" id="hp-group-1">
+  <div class="hp-row">
+    <span class="hp-label">Г</span>
+    <div class="hp-container"><div class="hp-bar hp-head" id="hp1-head"></div></div>
   </div>
-  <div id="status"></div>
-
-  <div id="controls">
-    <div id="move-row">
-      <div id="joystick-zone"><div id="joystick-knob"></div></div>
-    </div>
-    <div id="action-row">
-      <div id="leg-btn" class="zone-btn">НОГА</div>
-      <div id="body-btn" class="zone-btn">ТЕЛО</div>
-      <div id="head-btn" class="zone-btn">ГОЛОВА</div>
-      <div id="block-btn">БЛОК</div>
-    </div>
+  <div class="hp-row">
+    <span class="hp-label">Т</span>
+    <div class="hp-container"><div class="hp-bar hp-torso-1" id="hp1-torso"></div></div>
   </div>
+  <div class="hp-row">
+    <span class="hp-label">Н</span>
+    <div class="hp-container"><div class="hp-bar hp-legs" id="hp1-legs"></div></div>
+  </div>
+</div>
 
-  <script src="/socket.io/socket.io.js"></script>
-  <script src="game.js"></script>
+<div id="stamina-wrap"><div id="stamina-bar"></div></div>
+
+<div id="hold-hint">Зажми НОГА или ГОЛОВА для усиленного удара</div>
+
+<div id="joystick-zone">
+  <div id="joystick-knob"></div>
+</div>
+
+<div id="attack-controls">
+  <div id="block-btn" class="atk-btn">БЛОК</div>
+  <div id="kick-btn" class="atk-btn">НОГА</div>
+  <div id="hand-btn" class="atk-btn">ТЕЛО</div>
+  <div id="attack-btn" class="atk-btn">ГОЛОВА</div>
+</div>
+
+<div id="ko-overlay">
+  <div id="ko-text"></div>
+  <div id="ko-sub"></div>
+</div>
+
+<div id="menu-overlay">
+  <div id="menu-title">🥊 OCTAGON DUEL</div>
+  <div id="menu-subtitle">Джойстик слева — движение.<br>«ГОЛОВА» — джеб, «ТЕЛО» — хук (может критануть), «НОГА» — лоу-кик.<br>Зажми «ГОЛОВА» или «НОГА» подольше — получится усиленный удар (хук/вертушка в голову).<br>«БЛОК» — держи, чтобы гасить урон. Сломанная нога = технический нокаут. Если крови будет слишком много — бой остановят.</div>
+  <button id="play-btn">В ОКТАГОН</button>
+  <div id="online-counter">Сейчас играют: <span id="online-count">—</span></div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="game.js"></script>
 </body>
 </html>
