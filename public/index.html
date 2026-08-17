@@ -1,9 +1,10 @@
+cat > /mnt/user-data/outputs/index.html << 'HTMLEOF'
 <!DOCTYPE html>
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Octagon Duel</title>
+<title>Sword Duel</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
   html, body {
@@ -11,7 +12,7 @@
     padding: 0;
     width: 100%;
     height: 100%;
-    background: #0c0d12;
+    background: #14100e;
     overflow: hidden;
     font-family: -apple-system, BlinkMacSystemFont, sans-serif;
     color: #fff;
@@ -23,7 +24,7 @@
     display: block;
     width: 100%;
     height: 100%;
-    background: #14100e;
+    background: linear-gradient(#3a2f28, #6b5644);
   }
 
   #status {
@@ -35,10 +36,9 @@
     font-weight: bold;
     text-shadow: 0 2px 4px rgba(0,0,0,0.8);
     pointer-events: none;
-    z-index: 3;
+    z-index: 5;
   }
 
-  /* ---- HUD: полоски частей тела ---- */
   .hp-group {
     position: absolute;
     top: 10px;
@@ -46,10 +46,21 @@
     display: flex;
     flex-direction: column;
     gap: 3px;
-    z-index: 3;
   }
   #hp-group-0 { left: 10px; }
   #hp-group-1 { right: 10px; align-items: flex-end; }
+
+  .hp-name {
+    font-size: 11px;
+    font-weight: bold;
+    color: rgba(255,255,255,0.85);
+    text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+    margin-bottom: 1px;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 
   .hp-row {
     display: flex;
@@ -88,7 +99,6 @@
   .hp-torso-1 { background: #7c4a4a; }
   .hp-legs { background: #6b5342; }
 
-  /* ---- Выносливость ---- */
   #stamina-wrap {
     position: absolute;
     left: 24px;
@@ -99,13 +109,13 @@
     border: 1.5px solid rgba(255,255,255,0.6);
     border-radius: 4px;
     overflow: hidden;
-    z-index: 3;
+    display: none;
   }
   #stamina-bar {
     height: 100%;
     width: 100%;
     background: linear-gradient(#ffe066, #d9a521);
-    transition: width 0.15s ease-out;
+    transition: width 0.15s ease-out, background-color 0.2s;
   }
 
   #joystick-zone {
@@ -117,7 +127,6 @@
     border-radius: 50%;
     background: rgba(255,255,255,0.15);
     border: 2px solid rgba(255,255,255,0.3);
-    z-index: 3;
   }
   #joystick-knob {
     position: absolute;
@@ -129,83 +138,48 @@
     background: rgba(255,255,255,0.8);
   }
 
-  /* ---- Кнопки ударов ---- */
-  #attack-controls {
+  #attack-btn {
     position: absolute;
-    right: 16px;
-    bottom: 24px;
-    display: flex;
-    align-items: flex-end;
-    gap: 8px;
-    z-index: 3;
-  }
-
-  .atk-btn {
+    right: 24px;
+    bottom: 50px;
+    width: 110px;
+    height: 110px;
     border-radius: 50%;
+    background: rgba(255,80,80,0.35);
+    border: 2px solid rgba(255,120,120,0.6);
     color: #fff;
-    font-size: 10px;
+    font-size: 15px;
     font-weight: bold;
-    letter-spacing: 0.5px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    text-align: center;
-    transition: filter 0.1s, transform 0.1s;
-  }
-  .atk-btn:active { filter: brightness(0.8); transform: scale(0.95); }
-  .atk-btn.charging { animation: chargePulse 0.38s ease-in forwards; }
-  .atk-btn.charged-flash { filter: brightness(1.7); }
-  @keyframes chargePulse {
-    from { box-shadow: 0 0 0 rgba(255,255,255,0); }
-    to { box-shadow: 0 0 22px 8px rgba(255,255,255,0.6); }
-  }
-  body.player-down #attack-controls,
-  body.player-down #joystick-zone {
-    opacity: 0.35;
-    pointer-events: none;
+    transition: opacity 0.2s;
   }
 
   #kick-btn {
-    width: 72px;
-    height: 72px;
-    background: rgba(255,170,60,0.32);
-    border: 2px solid rgba(255,190,100,0.6);
-  }
-
-  #hand-btn {
-    width: 80px;
-    height: 80px;
-    background: rgba(255,215,90,0.32);
-    border: 2px solid rgba(255,225,120,0.6);
-  }
-
-  #attack-btn {
-    width: 96px;
-    height: 96px;
-    background: rgba(255,80,80,0.32);
-    border: 2px solid rgba(255,120,120,0.6);
-  }
-
-  #block-btn {
-    width: 72px;
-    height: 72px;
-    background: rgba(90,140,255,0.32);
-    border: 2px solid rgba(130,170,255,0.6);
-  }
-  #block-btn.active {
-    background: rgba(90,140,255,0.65);
-    box-shadow: 0 0 14px rgba(110,170,255,0.8);
-  }
-
-  #hold-hint {
     position: absolute;
-    right: 16px;
-    bottom: 210px;
-    font-size: 11px;
-    color: rgba(255,255,255,0.55);
-    text-align: right;
-    z-index: 3;
-    max-width: 200px;
+    right: 148px;
+    bottom: 50px;
+    width: 84px;
+    height: 84px;
+    border-radius: 50%;
+    background: rgba(255,170,60,0.3);
+    border: 2px solid rgba(255,190,100,0.6);
+    color: #fff;
+    font-size: 13px;
+    font-weight: bold;
+    transition: opacity 0.2s;
+  }
+
+  .btn-disabled {
+    opacity: 0.35;
+  }
+
+  #hit-flash {
+    position: absolute;
+    top: 0; left: 0; width: 100%; height: 100%;
+    background: radial-gradient(rgba(180,0,0,0.45), rgba(120,0,0,0.1) 70%);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.1s;
+    z-index: 4;
   }
 
   #menu-overlay {
@@ -214,7 +188,7 @@
     left: 0;
     width: 100%;
     height: 100%;
-    background: linear-gradient(#111318, #2a1414);
+    background: linear-gradient(#1c1512, #3a2f28);
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -223,7 +197,7 @@
   }
 
   #menu-title {
-    font-size: 32px;
+    font-size: 34px;
     font-weight: bold;
     letter-spacing: 1px;
     margin-bottom: 6px;
@@ -256,86 +230,25 @@
     transform: scale(0.97);
   }
 
-  #bot-row {
-    display: flex;
-    gap: 10px;
-    margin-top: 14px;
-  }
-  .bot-btn {
-    padding: 10px 14px;
-    border-radius: 20px;
-    border: 2px solid rgba(255,255,255,0.25);
-    background: rgba(255,255,255,0.08);
-    color: #fff;
+  #online-counter {
+    margin-top: 24px;
     font-size: 13px;
-    font-weight: bold;
+    color: rgba(255,255,255,0.5);
   }
-  .bot-btn:active { filter: brightness(0.8); transform: scale(0.96); }
-  #bot-easy { border-color: rgba(120,220,140,0.6); }
-  #bot-medium { border-color: rgba(255,200,90,0.6); }
-  #bot-hard { border-color: rgba(255,100,100,0.6); }
-
-  #stats-box {
-    margin-top: 26px;
-    display: flex;
-    gap: 22px;
-    background: rgba(255,255,255,0.06);
-    border: 1px solid rgba(255,255,255,0.15);
-    border-radius: 14px;
-    padding: 10px 20px;
-  }
-  #stats-box .stat-item {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    font-size: 11px;
-    color: rgba(255,255,255,0.6);
-  }
-  #stats-box .stat-value {
-    font-size: 18px;
-    font-weight: bold;
+  #online-counter span {
     color: #ffe066;
-  }
-
-  /* ---- Экран нокаута ---- */
-  #ko-overlay {
-    position: absolute;
-    inset: 0;
-    z-index: 15;
-    display: none;
-    align-items: center;
-    justify-content: center;
-    flex-direction: column;
-    text-align: center;
-    background: radial-gradient(circle, rgba(120,0,0,0.55), rgba(0,0,0,0.9));
-  }
-  #ko-overlay.show { display: flex; }
-  #ko-text {
-    font-size: 42px;
-    font-weight: 900;
-    letter-spacing: 1px;
-    color: #ffdf5e;
-    text-shadow: 0 0 20px rgba(255,80,0,0.9), 0 4px 10px rgba(0,0,0,0.8);
-    animation: koPop 0.4s cubic-bezier(.2,1.4,.4,1);
-  }
-  #ko-sub {
-    margin-top: 10px;
-    font-size: 16px;
-    color: #fff;
-    text-shadow: 0 2px 6px #000;
-  }
-  @keyframes koPop {
-    from { transform: scale(0.4); opacity: 0; }
-    to { transform: scale(1); opacity: 1; }
+    font-weight: bold;
   }
 </style>
 </head>
 <body>
 
 <canvas id="arena"></canvas>
+<div id="hit-flash"></div>
 <div id="status"></div>
 
 <div class="hp-group" id="hp-group-0">
+  <div class="hp-name" id="name-0">Игрок 1</div>
   <div class="hp-row">
     <span class="hp-label">Г</span>
     <div class="hp-container"><div class="hp-bar hp-head" id="hp0-head"></div></div>
@@ -351,6 +264,7 @@
 </div>
 
 <div class="hp-group" id="hp-group-1">
+  <div class="hp-name" id="name-1">Игрок 2</div>
   <div class="hp-row">
     <span class="hp-label">Г</span>
     <div class="hp-container"><div class="hp-bar hp-head" id="hp1-head"></div></div>
@@ -367,40 +281,22 @@
 
 <div id="stamina-wrap"><div id="stamina-bar"></div></div>
 
-<div id="hold-hint">Зажми НОГА или ГОЛОВА для усиленного удара</div>
-
 <div id="joystick-zone">
   <div id="joystick-knob"></div>
 </div>
-
-<div id="attack-controls">
-  <div id="block-btn" class="atk-btn">БЛОК</div>
-  <div id="kick-btn" class="atk-btn">НОГА</div>
-  <div id="hand-btn" class="atk-btn">ТЕЛО</div>
-  <div id="attack-btn" class="atk-btn">ГОЛОВА</div>
-</div>
-
-<div id="ko-overlay">
-  <div id="ko-text"></div>
-  <div id="ko-sub"></div>
-</div>
+<button id="kick-btn">ПИНОК</button>
+<button id="attack-btn">МЕЧ</button>
 
 <div id="menu-overlay">
-  <div id="menu-title">🥊 OCTAGON DUEL</div>
-  <div id="menu-subtitle">Джойстик слева — движение.<br>«ГОЛОВА» — джеб, «ТЕЛО» — хук (может критануть), «НОГА» — лоу-кик.<br>Зажми «ГОЛОВА» или «НОГА» подольше — получится усиленный удар (хук/вертушка в голову).<br>«БЛОК» — держи, чтобы гасить урон. Сломанная нога = технический нокаут. Если крови будет слишком много — бой остановят.</div>
-  <button id="play-btn">🧑‍🤝‍🧑 В ОКТАГОН (с игроком)</button>
-  <div id="bot-row">
-    <button id="bot-easy" class="bot-btn">🤖 Лёгкий</button>
-    <button id="bot-medium" class="bot-btn">🤖 Средний</button>
-    <button id="bot-hard" class="bot-btn">🤖 Тяжёлый</button>
-  </div>
-  <div id="stats-box">
-    <div class="stat-item"><div class="stat-value" id="online-count">—</div>Онлайн</div>
-    <div class="stat-item"><div class="stat-value" id="total-games">—</div>Сыграно боёв</div>
-  </div>
+  <div id="menu-title">⚔️ SWORD DUEL</div>
+  <div id="menu-subtitle">Джойстик слева — движение.<br>«МЕЧ» бьёт по голове/торсу издалека, «ПИНОК» — по ногам вблизи, сильнее.<br>Следи за выносливостью — на удар без сил не хватит.</div>
+  <button id="play-btn">ИГРАТЬ</button>
+  <div id="online-counter">Сейчас играют: <span id="online-count">—</span></div>
 </div>
 
 <script src="/socket.io/socket.io.js"></script>
 <script src="game.js"></script>
 </body>
 </html>
+HTMLEOF
+echo done
