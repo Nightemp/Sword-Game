@@ -57,6 +57,8 @@ let particles = [];
 let sparks = [];
 let bloodPools = [];
 let headHits = {};
+let bruiseMarks = {};
+let critPopups = [];
 let shake = 0;
 let finished = false;
 let koSlot = null;
@@ -91,6 +93,8 @@ socket.on('start_game', function (data) {
   finished = false;
   koSlot = null;
   headHits = {};
+  bruiseMarks = {};
+  critPopups = [];
   bloodPools = [];
   hitStun = {};
   attackActive = {};
@@ -118,15 +122,21 @@ socket.on('hit_landed', function (data) {
     if (p) spawnBlockSpark(p, data.part);
     return;
   }
-  shake = data.part === 'legs' ? 12 : 8;
+  const crit = !!data.crit;
+  shake = crit ? (data.part === 'legs' ? 18 : 14) : (data.part === 'legs' ? 12 : 8);
   hitStun[data.targetSlot] = { time: performance.now(), part: data.part };
   if (p) {
-    spawnHitEffect(p, data.part);
-    spawnArenaBlood(p, data.part);
+    spawnHitEffect(p, data.part, crit);
+    spawnArenaBlood(p, data.part, crit);
+    if (crit) spawnCritPopup(p, data.part);
   }
   spawnHudBlood(data.targetSlot, data.part);
   if (data.part === 'head') {
     headHits[data.targetSlot] = (headHits[data.targetSlot] || 0) + 1;
+  }
+  if (crit) {
+    if (!bruiseMarks[data.targetSlot]) bruiseMarks[data.targetSlot] = { head: 0, torso: 0, legs: 0 };
+    bruiseMarks[data.targetSlot][data.part] = Math.min((bruiseMarks[data.targetSlot][data.part] || 0) + 1, 4);
   }
 });
 socket.on('too_tired', function () {
@@ -203,7 +213,7 @@ function spawnHudBlood(slot, part) {
 }
 
 // ---------- КРОВЬ НА АРЕНЕ (лужи) ----------
-function spawnArenaBlood(p, part) {
+function spawnArenaBlood(p, part, crit) {
   const scale = cssW / 800;
   const px = p.x * scale;
   const groundY = cssH * 0.82;
@@ -211,34 +221,43 @@ function spawnArenaBlood(p, part) {
     x: px + (Math.random() - 0.5) * 14,
     y: groundY,
     r: 0,
-    maxR: part === 'head' ? 16 : 11,
+    maxR: (part === 'head' ? 16 : 11) * (crit ? 1.6 : 1),
     life: 1,
   });
   if (bloodPools.length > 40) bloodPools.shift();
 }
 
 // ---------- ЭФФЕКТЫ НА АРЕНЕ ----------
-function spawnHitEffect(p, part) {
+function spawnHitEffect(p, part, crit) {
   const scale = cssW / 800;
   const px = p.x * scale;
   const groundY = cssH * 0.82;
   const partY = part === 'head' ? groundY - 80 : part === 'legs' ? groundY - 15 : groundY - 50;
-  for (let i = 0; i < 6; i++) {
+  const count = crit ? 12 : 6;
+  for (let i = 0; i < count; i++) {
     particles.push({
       x: px, y: partY,
-      vx: (Math.random() - 0.5) * 5, vy: -Math.random() * 4 - 1,
-      life: 1, color: '#c8102e', size: 2 + Math.random() * 2,
+      vx: (Math.random() - 0.5) * (crit ? 7 : 5), vy: -Math.random() * (crit ? 6 : 4) - 1,
+      life: 1, color: '#c8102e', size: (crit ? 3 : 2) + Math.random() * 2,
     });
   }
-  for (let i = 0; i < 8; i++) {
+  const sparkCount = crit ? 14 : 8;
+  for (let i = 0; i < sparkCount; i++) {
     const angle = Math.random() * Math.PI * 2;
     sparks.push({
       x: px, y: partY,
-      vx: Math.cos(angle) * (2 + Math.random() * 3),
-      vy: Math.sin(angle) * (2 + Math.random() * 3),
+      vx: Math.cos(angle) * (2 + Math.random() * (crit ? 5 : 3)),
+      vy: Math.sin(angle) * (2 + Math.random() * (crit ? 5 : 3)),
       life: 1, color: '#ffb3b3',
     });
   }
+}
+function spawnCritPopup(p, part) {
+  const scale = cssW / 800;
+  const px = p.x * scale;
+  const groundY = cssH * 0.82;
+  const py = part === 'head' ? groundY - 100 : part === 'legs' ? groundY - 35 : groundY - 70;
+  critPopups.push({ x: px, y: py, life: 1 });
 }
 function spawnBlockSpark(p, part) {
   const scale = cssW / 800;
@@ -262,6 +281,8 @@ function updateParticles() {
   sparks = sparks.filter(function (s) { return s.life > 0; });
   bloodPools.forEach(function (b) { if (b.r < b.maxR) b.r += 0.8; b.life -= 0.0015; });
   bloodPools = bloodPools.filter(function (b) { return b.life > 0; });
+  critPopups.forEach(function (cp) { cp.y -= 0.6; cp.life -= 0.02; });
+  critPopups = critPopups.filter(function (cp) { return cp.life > 0; });
 }
 function drawParticles() {
   bloodPools.forEach(function (b) {
@@ -287,6 +308,18 @@ function drawParticles() {
     ctx.lineTo(s.x - s.vx * 1.5, s.y - s.vy * 1.5);
     ctx.stroke();
   });
+  ctx.globalAlpha = 1;
+  critPopups.forEach(function (cp) {
+    ctx.globalAlpha = Math.max(cp.life, 0);
+    ctx.fillStyle = '#ffde59';
+    ctx.font = 'bold 20px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.shadowColor = '#000';
+    ctx.shadowBlur = 6;
+    ctx.fillText('КРИТ!', cp.x, cp.y);
+    ctx.shadowBlur = 0;
+  });
+  ctx.textAlign = 'left';
   ctx.globalAlpha = 1;
 }
 
@@ -410,12 +443,14 @@ function drawFighter(p, groundY, scale, isAttacking, swingT, target) {
   ctx.ellipse(x, y + 3, 23, 6, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  // задняя (опорная) нога
+  // задняя (опорная) нога — бедро + голень
   const legGrad = ctx.createLinearGradient(x - 14, y - 28, x + 14, y);
   legGrad.addColorStop(0, '#241a12');
   legGrad.addColorStop(1, '#3a2a1c');
   ctx.fillStyle = legGrad;
-  ctx.fillRect(x - 13 - p.facing * 2 - legSwing * 0.3, y - 30 - bob, 10, 30);
+  ctx.fillRect(x - 13 - p.facing * 2 - legSwing * 0.3, y - 30 - bob, 10, 14);
+  ctx.fillStyle = '#2e2116';
+  ctx.fillRect(x - 12 - p.facing * 2 - legSwing * 0.5, y - 16 - bob, 8, 16);
 
   // передняя нога
   if (isNormalKick || isPowerKick) {
@@ -429,7 +464,20 @@ function drawFighter(p, groundY, scale, isAttacking, swingT, target) {
     ctx.restore();
   } else {
     ctx.fillStyle = legGrad;
-    ctx.fillRect(x + 3 + p.facing * 2 + legSwing * 0.3, y - 30 - bob, 10, 30);
+    ctx.fillRect(x + 3 + p.facing * 2 + legSwing * 0.3, y - 30 - bob, 10, 14);
+    ctx.fillStyle = '#2e2116';
+    ctx.fillRect(x + 4 + p.facing * 2 + legSwing * 0.5, y - 16 - bob, 8, 16);
+  }
+
+  // синяки на ногах
+  const lb = (bruiseMarks[p.slot] && bruiseMarks[p.slot].legs) || 0;
+  if (lb > 0) {
+    ctx.fillStyle = 'rgba(70,10,60,0.5)';
+    for (let i = 0; i < lb; i++) {
+      ctx.beginPath();
+      ctx.ellipse(x + p.facing * (4 + i * 3), y - 10 - bob, 4, 3, 0.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
   // торс
@@ -449,8 +497,31 @@ function drawFighter(p, groundY, scale, isAttacking, swingT, target) {
   ctx.lineWidth = 1.3;
   ctx.stroke();
 
+  ctx.strokeStyle = 'rgba(0,0,0,0.18)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x, shT + 6);
+  ctx.lineTo(x, shB - 4);
+  ctx.stroke();
+
   ctx.fillStyle = colorDark;
   ctx.fillRect(x - 13, shB - 2, 26, 10);
+  ctx.fillStyle = 'rgba(255,255,255,0.22)';
+  ctx.fillRect(x - 13, shB - 2, 3, 10);
+  ctx.fillRect(x + 10, shB - 2, 3, 10);
+
+  // синяки на торсе
+  const tb = (bruiseMarks[p.slot] && bruiseMarks[p.slot].torso) || 0;
+  if (tb > 0) {
+    ctx.fillStyle = 'rgba(70,10,60,0.55)';
+    for (let i = 0; i < tb; i++) {
+      const bx = x + (i % 2 === 0 ? -6 : 6);
+      const by = shT + 12 + i * 6;
+      ctx.beginPath();
+      ctx.ellipse(bx, by, 5, 4, 0.3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
 
   // задняя рука
   ctx.fillStyle = skinDark;
@@ -472,6 +543,10 @@ function drawFighter(p, groundY, scale, isAttacking, swingT, target) {
   ctx.fillStyle = '#2a1c12';
   ctx.beginPath();
   ctx.arc(x, y - 87 - bob, 13, Math.PI, 0);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(0,0,0,0.12)';
+  ctx.beginPath();
+  ctx.ellipse(x, y - 72 - bob, 8, 3, 0, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.fillStyle = '#1a1410';
@@ -636,14 +711,19 @@ function bindHoldAttack(id, normalTarget, powerTarget, holdMs) {
     e.preventDefault();
     if (finished) return;
     firedPower = false;
+    btn.classList.add('charging');
     timer = setTimeout(function () {
       firedPower = true;
+      btn.classList.remove('charging');
+      btn.classList.add('charged-flash');
+      setTimeout(function () { btn.classList.remove('charged-flash'); }, 200);
       socket.emit('attack', { target: powerTarget });
     }, holdMs);
   }
   function end(e) {
     if (e) e.preventDefault();
     clearTimeout(timer);
+    btn.classList.remove('charging');
     if (!firedPower && !finished) {
       socket.emit('attack', { target: normalTarget });
     }
