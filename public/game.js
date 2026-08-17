@@ -59,10 +59,50 @@ let bloodPools = [];
 let headHits = {};
 let bruiseMarks = {};
 let critPopups = [];
+let downPopups = [];
+let downState = {};
+let myDown = false;
 let shake = 0;
 let finished = false;
 let koSlot = null;
 let fallStart = 0;
+
+function easeOutBack(t) {
+  const c1 = 1.70158, c3 = c1 + 1;
+  return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+}
+function easeOutBounce(t) {
+  const n1 = 7.5625, d1 = 2.75;
+  if (t < 1 / d1) return n1 * t * t;
+  if (t < 2 / d1) return n1 * (t -= 1.5 / d1) * t + 0.75;
+  if (t < 2.5 / d1) return n1 * (t -= 2.25 / d1) * t + 0.9375;
+  return n1 * (t -= 2.625 / d1) * t + 0.984375;
+}
+function getFallState(slot) {
+  const isKo = koSlot === slot;
+  const kd = downState[slot];
+  if (!isKo && !kd) return null;
+
+  const now = performance.now();
+  let t;
+  if (isKo) {
+    t = Math.min(1, (now - fallStart) / 650);
+  } else {
+    const elapsed = now - kd.start;
+    const fallDur = 350;
+    const holdEnd = kd.recoverAt - kd.start;
+    const riseDur = 400;
+    if (elapsed < fallDur) t = elapsed / fallDur;
+    else if (elapsed < holdEnd) t = 1;
+    else if (elapsed < holdEnd + riseDur) t = 1 - (elapsed - holdEnd) / riseDur;
+    else { delete downState[slot]; return null; }
+  }
+  const clamped = Math.max(0, Math.min(1, t));
+  return {
+    angle: easeOutBack(clamped),
+    bounce: easeOutBounce(Math.min(clamped * 1.3, 1)),
+  };
+}
 
 function hideMenu() {
   document.getElementById('menu-overlay').style.display = 'none';
@@ -117,6 +157,10 @@ socket.on('start_game', function (data) {
   headHits = {};
   bruiseMarks = {};
   critPopups = [];
+  downPopups = [];
+  downState = {};
+  myDown = false;
+  document.body.classList.remove('player-down');
   bloodPools = [];
   hitStun = {};
   attackActive = {};
@@ -127,6 +171,12 @@ socket.on('start_game', function (data) {
 socket.on('state_update', function (p) {
   players = p;
   updateHpBars();
+  const me = players[Object.keys(players).find(function (k) { return players[k].slot === mySlot; })];
+  const nowDown = !!(me && me.down);
+  if (nowDown !== myDown) {
+    myDown = nowDown;
+    document.body.classList.toggle('player-down', myDown);
+  }
 });
 socket.on('attack_anim', function (data) {
   const slot = data.slot;
@@ -159,6 +209,11 @@ socket.on('hit_landed', function (data) {
   if (crit) {
     if (!bruiseMarks[data.targetSlot]) bruiseMarks[data.targetSlot] = { head: 0, torso: 0, legs: 0 };
     bruiseMarks[data.targetSlot][data.part] = Math.min((bruiseMarks[data.targetSlot][data.part] || 0) + 1, 4);
+  }
+  if (data.down) {
+    downState[data.targetSlot] = { start: performance.now(), recoverAt: performance.now() + 1300 };
+    if (p) spawnDownPopup(p);
+    shake = 26;
   }
 });
 socket.on('too_tired', function () {
@@ -281,6 +336,12 @@ function spawnCritPopup(p, part) {
   const py = part === 'head' ? groundY - 100 : part === 'legs' ? groundY - 35 : groundY - 70;
   critPopups.push({ x: px, y: py, life: 1 });
 }
+function spawnDownPopup(p) {
+  const scale = cssW / 800;
+  const px = p.x * scale;
+  const groundY = cssH * 0.82;
+  downPopups.push({ x: px, y: groundY - 110, life: 1 });
+}
 function spawnBlockSpark(p, part) {
   const scale = cssW / 800;
   const px = p.x * scale;
@@ -305,6 +366,8 @@ function updateParticles() {
   bloodPools = bloodPools.filter(function (b) { return b.life > 0; });
   critPopups.forEach(function (cp) { cp.y -= 0.6; cp.life -= 0.02; });
   critPopups = critPopups.filter(function (cp) { return cp.life > 0; });
+  downPopups.forEach(function (dp) { dp.y -= 0.4; dp.life -= 0.012; });
+  downPopups = downPopups.filter(function (dp) { return dp.life > 0; });
 }
 function drawParticles() {
   bloodPools.forEach(function (b) {
@@ -339,6 +402,16 @@ function drawParticles() {
     ctx.shadowColor = '#000';
     ctx.shadowBlur = 6;
     ctx.fillText('КРИТ!', cp.x, cp.y);
+    ctx.shadowBlur = 0;
+  });
+  downPopups.forEach(function (dp) {
+    ctx.globalAlpha = Math.max(dp.life, 0);
+    ctx.fillStyle = '#ff4d4d';
+    ctx.font = 'bold 24px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.shadowColor = '#000';
+    ctx.shadowBlur = 8;
+    ctx.fillText('НОКДАУН!', dp.x, dp.y);
     ctx.shadowBlur = 0;
   });
   ctx.textAlign = 'left';
@@ -421,10 +494,10 @@ function drawFighter(p, groundY, scale, isAttacking, swingT, target) {
   const isPowerPunch = target === 'power_punch';
 
   let fallAngle = 0, fallLift = 0;
-  if (koSlot === p.slot) {
-    const fallT = Math.min(1, (performance.now() - fallStart) / 650);
-    fallAngle = fallT * (Math.PI / 2) * p.facing * -1;
-    fallLift = Math.sin(fallT * Math.PI) * -10;
+  const fallState = getFallState(p.slot);
+  if (fallState) {
+    fallAngle = fallState.angle * (Math.PI / 2) * p.facing * -1;
+    fallLift = -8 * (1 - fallState.bounce);
   }
   let spinAngle = 0;
   if (isPowerKick) {
