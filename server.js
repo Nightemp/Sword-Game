@@ -127,6 +127,7 @@ function resolveAttack(room, roomId, socket, type) {
   const opponentId = room.order.find((id) => id !== socket.id);
   let hitPart = null;
   let hitBlocked = false;
+  let hitCrit = false;
   let endedReason = null;
   let winnerSlot = null;
 
@@ -140,7 +141,14 @@ function resolveAttack(room, roomId, socket, type) {
       const part = move.part;
       const prevLegs = opponent.parts.legs;
       let dmg = move.dmg;
-      if (part === 'torso' && Math.random() < TORSO_CRIT_CHANCE) dmg += TORSO_CRIT_BONUS;
+      let isCrit = false;
+      if (part === 'torso' && Math.random() < TORSO_CRIT_CHANCE) {
+        dmg += TORSO_CRIT_BONUS;
+        isCrit = true;
+      }
+      if (type === 'power_punch' || type === 'power_kick') {
+        isCrit = true;
+      }
 
       const blocked = !!opponent.blocking;
       if (blocked) dmg = Math.round(dmg * BLOCK_DAMAGE_MULT);
@@ -149,7 +157,8 @@ function resolveAttack(room, roomId, socket, type) {
       attacker.stamina = Math.min(100, attacker.stamina + (blocked ? 2 : STAMINA_REFUND_ON_HIT));
       hitPart = part;
       hitBlocked = blocked;
-      room.bloodLevel += blocked ? Math.round(move.blood * 0.15) : move.blood;
+      hitCrit = isCrit;
+      room.bloodLevel += blocked ? Math.round(move.blood * 0.15) : (isCrit ? Math.round(move.blood * 1.4) : move.blood);
 
       if (part === 'legs' && prevLegs > 0 && opponent.parts.legs <= 0) {
         endedReason = 'legs_broken';
@@ -170,6 +179,7 @@ function resolveAttack(room, roomId, socket, type) {
       targetSlot: room.players[opponentId].slot,
       part: hitPart,
       blocked: hitBlocked,
+      crit: hitCrit,
     });
   }
   if (endedReason) {
