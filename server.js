@@ -37,6 +37,8 @@ const STAMINA_REFUND_ON_HIT = 6;
 const REGEN_INTERVAL = 200;
 const BLOOD_STOP_THRESHOLD = 100;
 const BLOCK_DAMAGE_MULT = 0.3;
+const KNOCKDOWN_CHANCE = 0.35;
+const KNOCKDOWN_MS = 1300;
 
 const BOT_PRESETS = {
   easy:   { tick: 700, moveChance: 0.4,  attackChance: 0.22, blockChance: 0.05, powerChance: 0.05, preferredRange: 70 },
@@ -52,6 +54,7 @@ function newPlayerState(slot) {
     stamina: 100,
     attacking: false,
     blocking: false,
+    down: false,
     slot,
   };
 }
@@ -131,7 +134,7 @@ function resolveAttack(room, roomId, socketLike, type) {
   const move = MOVES[type];
   if (!move) return;
   const attacker = room.players[socketLike.id];
-  if (!attacker || attacker.attacking || attacker.blocking || !isAlive(attacker)) return;
+  if (!attacker || attacker.attacking || attacker.blocking || attacker.down || !isAlive(attacker)) return;
 
   if (attacker.stamina < move.cost) {
     socketLike.emit('too_tired');
@@ -145,6 +148,7 @@ function resolveAttack(room, roomId, socketLike, type) {
   let hitPart = null;
   let hitBlocked = false;
   let hitCrit = false;
+  let hitKnockdown = false;
   let endedReason = null;
   let winnerSlot = null;
 
@@ -177,6 +181,19 @@ function resolveAttack(room, roomId, socketLike, type) {
       hitCrit = isCrit;
       room.bloodLevel += blocked ? Math.round(move.blood * 0.15) : (isCrit ? Math.round(move.blood * 1.4) : move.blood);
 
+      if (!blocked && isCrit && !opponent.down && isAlive(opponent) && Math.random() < KNOCKDOWN_CHANCE) {
+        opponent.down = true;
+        hitKnockdown = true;
+        const targetId = opponentId;
+        setTimeout(() => {
+          const r = rooms.get(roomId);
+          if (r && r.players[targetId]) {
+            r.players[targetId].down = false;
+            io.to(roomId).emit('state_update', r.players);
+          }
+        }, KNOCKDOWN_MS);
+      }
+
       if (part === 'legs' && prevLegs > 0 && opponent.parts.legs <= 0) {
         endedReason = 'legs_broken';
         winnerSlot = attacker.slot;
@@ -197,6 +214,7 @@ function resolveAttack(room, roomId, socketLike, type) {
       part: hitPart,
       blocked: hitBlocked,
       crit: hitCrit,
+      down: hitKnockdown,
     });
   }
   if (endedReason) {
@@ -215,7 +233,7 @@ function startBotLoop(room, roomId) {
     const bot = room.players[room.botId];
     const humanId = room.order.find((id) => id !== room.botId);
     const human = room.players[humanId];
-    if (!bot || !human || !isAlive(bot)) return;
+    if (!bot || !human || !isAlive(bot) || bot.down) return;
 
     const dist = human.x - bot.x;
     const absDist = Math.abs(dist);
@@ -317,7 +335,7 @@ io.on('connection', (socket) => {
     const room = rooms.get(roomId);
     if (!room || !room.players[socket.id] || room.finished) return;
     const p = room.players[socket.id];
-    if (!isAlive(p)) return;
+    if (!isAlive(p) || p.down) return;
     const speed = moveSpeed(p);
     p.x += dir * speed;
     p.x = Math.max(20, Math.min(ARENA_WIDTH - 20, p.x));
@@ -328,7 +346,7 @@ io.on('connection', (socket) => {
   socket.on('block_start', () => {
     const roomId = socket.data.roomId;
     const room = rooms.get(roomId);
-    if (!room || !room.players[socket.id] || room.finished) return;
+    if (!room || !room.players[socket.id] || room.finished || room.players[socket.id].down) return;
     room.players[socket.id].blocking = true;
     io.to(roomId).emit('state_update', room.players);
   });
