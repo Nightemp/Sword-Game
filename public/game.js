@@ -64,22 +64,44 @@ let finished = false;
 let koSlot = null;
 let fallStart = 0;
 
-function hideMenu(e) {
-  if (e) e.preventDefault();
+function hideMenu() {
   document.getElementById('menu-overlay').style.display = 'none';
 }
-const playBtn = document.getElementById('play-btn');
-playBtn.addEventListener('touchstart', hideMenu, { passive: false });
-playBtn.addEventListener('mousedown', hideMenu);
-playBtn.addEventListener('click', hideMenu);
 
 const socket = io();
 socket.emit('get_stats');
-socket.emit('join_room', { roomId: roomId });
+
+function startMultiplayer(e) {
+  if (e) e.preventDefault();
+  hideMenu();
+  socket.emit('join_room', { roomId: roomId });
+}
+const playBtn = document.getElementById('play-btn');
+playBtn.addEventListener('touchstart', startMultiplayer, { passive: false });
+playBtn.addEventListener('mousedown', startMultiplayer);
+playBtn.addEventListener('click', startMultiplayer);
+
+function bindBotButton(id, difficulty) {
+  const btn = document.getElementById(id);
+  if (!btn) return;
+  function go(e) {
+    if (e) e.preventDefault();
+    hideMenu();
+    socket.emit('join_bot', { difficulty: difficulty });
+  }
+  btn.addEventListener('touchstart', go, { passive: false });
+  btn.addEventListener('mousedown', go);
+  btn.addEventListener('click', go);
+}
+bindBotButton('bot-easy', 'easy');
+bindBotButton('bot-medium', 'medium');
+bindBotButton('bot-hard', 'hard');
 
 socket.on('stats_update', function (data) {
   const el = document.getElementById('online-count');
   if (el) el.textContent = data.online;
+  const gEl = document.getElementById('total-games');
+  if (gEl) gEl.textContent = data.totalGames;
 });
 socket.on('joined', function (data) {
   mySlot = data.slot;
