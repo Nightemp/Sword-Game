@@ -251,14 +251,45 @@
     transform: scale(0.97);
   }
 
-  #online-counter {
-    margin-top: 24px;
-    font-size: 13px;
-    color: rgba(255,255,255,0.5);
+  #bot-row {
+    display: flex;
+    gap: 10px;
+    margin-top: 14px;
   }
-  #online-counter span {
-    color: #ffe066;
+  .bot-btn {
+    padding: 10px 14px;
+    border-radius: 20px;
+    border: 2px solid rgba(255,255,255,0.25);
+    background: rgba(255,255,255,0.08);
+    color: #fff;
+    font-size: 13px;
     font-weight: bold;
+  }
+  .bot-btn:active { filter: brightness(0.8); transform: scale(0.96); }
+  #bot-easy { border-color: rgba(120,220,140,0.6); }
+  #bot-medium { border-color: rgba(255,200,90,0.6); }
+  #bot-hard { border-color: rgba(255,100,100,0.6); }
+
+  #stats-box {
+    margin-top: 26px;
+    display: flex;
+    gap: 22px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 14px;
+    padding: 10px 20px;
+  }
+  #stats-box .stat-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    font-size: 11px;
+    color: rgba(255,255,255,0.6);
+  }
+  #stats-box .stat-value {
+    font-size: 18px;
+    font-weight: bold;
+    color: #ffe066;
   }
 
   /* ---- Экран нокаута ---- */
@@ -352,8 +383,16 @@
 <div id="menu-overlay">
   <div id="menu-title">🥊 OCTAGON DUEL</div>
   <div id="menu-subtitle">Джойстик слева — движение.<br>«ГОЛОВА» — джеб, «ТЕЛО» — хук (может критануть), «НОГА» — лоу-кик.<br>Зажми «ГОЛОВА» или «НОГА» подольше — получится усиленный удар (хук/вертушка в голову).<br>«БЛОК» — держи, чтобы гасить урон. Сломанная нога = технический нокаут. Если крови будет слишком много — бой остановят.</div>
-  <button id="play-btn">В ОКТАГОН</button>
-  <div id="online-counter">Сейчас играют: <span id="online-count">—</span></div>
+  <button id="play-btn">🧑‍🤝‍🧑 В ОКТАГОН (с игроком)</button>
+  <div id="bot-row">
+    <button id="bot-easy" class="bot-btn">🤖 Лёгкий</button>
+    <button id="bot-medium" class="bot-btn">🤖 Средний</button>
+    <button id="bot-hard" class="bot-btn">🤖 Тяжёлый</button>
+  </div>
+  <div id="stats-box">
+    <div class="stat-item"><div class="stat-value" id="online-count">—</div>Онлайн</div>
+    <div class="stat-item"><div class="stat-value" id="total-games">—</div>Сыграно боёв</div>
+  </div>
 </div>
 
 <script src="/socket.io/socket.io.js"></script>
