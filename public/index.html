@@ -167,8 +167,54 @@
     transition: opacity 0.2s;
   }
 
+  #takedown-btn {
+    position: absolute;
+    right: 78px;
+    bottom: 148px;
+    width: 84px;
+    height: 84px;
+    border-radius: 50%;
+    background: rgba(160,90,220,0.3);
+    border: 2px solid rgba(190,130,240,0.6);
+    color: #fff;
+    font-size: 11px;
+    font-weight: bold;
+    transition: opacity 0.2s;
+  }
+
   .btn-disabled {
     opacity: 0.35;
+  }
+
+  #escape-wrap {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: 210px;
+    width: 200px;
+    display: none;
+    text-align: center;
+    z-index: 6;
+  }
+  #escape-label {
+    font-size: 13px;
+    font-weight: bold;
+    color: #ffe066;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.8);
+    margin-bottom: 4px;
+  }
+  #escape-bar-wrap {
+    height: 10px;
+    background: rgba(0,0,0,0.5);
+    border: 1.5px solid rgba(255,255,255,0.6);
+    border-radius: 5px;
+    overflow: hidden;
+  }
+  #escape-bar {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(#ffe066, #d9a521);
+    transition: width 0.1s;
   }
 
   #hit-flash {
@@ -296,15 +342,21 @@
 
 <div id="stamina-wrap"><div id="stamina-bar"></div></div>
 
+<div id="escape-wrap">
+  <div id="escape-label">ВЫРВИСЬ! (тапай)</div>
+  <div id="escape-bar-wrap"><div id="escape-bar"></div></div>
+</div>
+
 <div id="joystick-zone">
   <div id="joystick-knob"></div>
 </div>
 <button id="kick-btn">ПИНОК</button>
+<button id="takedown-btn">ТЕЙКДАУН</button>
 <button id="attack-btn">МЕЧ</button>
 
 <div id="menu-overlay">
   <div id="menu-title">⚔️ SWORD DUEL</div>
-  <div id="menu-subtitle">Джойстик слева — движение.<br>«МЕЧ» бьёт по голове/торсу издалека, «ПИНОК» — по ногам вблизи, сильнее.<br>Следи за выносливостью — на удар без сил не хватит.</div>
+  <div id="menu-subtitle">Джойстик — движение. «МЕЧ»/«ПИНОК» — стоя, «ТЕЙКДАУН» — свалить соперника и добивать на полу.<br>Соперник может вырваться, если часто тапать.<br>Следи за выносливостью.</div>
   <button id="play-btn">ИГРОК vs ИГРОК</button>
   <button id="bot-btn">ИГРОК vs БОТ</button>
   <div id="online-counter">Сейчас играют: <span id="online-count">—</span></div>
