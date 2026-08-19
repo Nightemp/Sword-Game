@@ -34,15 +34,18 @@ let mySlot = null;
 let players = {};
 let attackFlashSlot = null;
 let attackFlashZone = null;
+let attackFlashLimb = null; // 'tri' | 'sq' | 'cross' | 'circle'
 let attackStartTime = {};
 const prevX = {};
 const walkPhase = {};
 let particles = [];
 let sparks = [];
 let bloodPools = [];
+const bloodDecals = {}; // slot -> [{zone, ox, oy, r}]
 let shake = 0;
 const fallProgress = {};
-const blockFlash = {};
+const blockFlashBody = {};
+const blockFlashHead = {};
 
 let history = [];
 const HISTORY_MAX = 90;
@@ -177,6 +180,8 @@ socket.on('start_game', function (data) {
   replay = null;
   history = [];
   floaters = [];
+  bloodDecals[0] = [];
+  bloodDecals[1] = [];
   countdown = { value: 3, startTime: performance.now() };
   updateBars();
 });
@@ -189,17 +194,20 @@ socket.on('attack_anim', function (data) {
   attackFlashZone = data.zone;
   attackStartTime[data.slot] = performance.now();
   playSwing();
-  setTimeout(function () { attackFlashSlot = null; attackFlashZone = null; }, 220);
+  const dur = data.power ? 380 : 220;
+  setTimeout(function () { attackFlashSlot = null; attackFlashZone = null; }, dur);
 });
 socket.on('hit_landed', function (data) {
   playClash();
   setTimeout(playHit, 60);
-  shake = data.zone === 'head' ? 12 : 8;
+  shake = (data.zone === 'head' ? 12 : 8) * (data.power ? 1.6 : 1);
   haptic(data.zone === 'head' ? 'ko' : 'hit');
   const p = Object.values(players).find(function (pl) { return pl.slot === data.targetSlot; });
   if (p) {
-    spawnHitEffect(p, data.zone === 'head', data.zone);
-    const dmg = data.zone === 'leg' ? 9 : data.zone === 'head' ? 11 : 14;
+    spawnHitEffect(p, data.zone === 'head' || data.power, data.zone);
+    addBloodDecal(p.slot, data.zone);
+    const baseDmg = data.zone === 'leg' ? 9 : data.zone === 'head' ? 11 : 14;
+    const dmg = data.power ? Math.round(baseDmg * 1.8) : baseDmg;
     const scale = cssW / 800;
     const zoneY = data.zone === 'head' ? cssH * 0.82 - 95 : data.zone === 'leg' ? cssH * 0.82 - 30 : cssH * 0.82 - 60;
     floaters.push({ x: p.x * scale, y: zoneY, text: '-' + dmg, life: 1, vy: -1.2 });
@@ -209,7 +217,8 @@ socket.on('block_landed', function (data) {
   playBlock();
   shake = 4;
   haptic('light');
-  blockFlash[data.targetSlot] = performance.now();
+  blockFlashBody[data.targetSlot] = performance.now();
+  blockFlashHead[data.targetSlot] = performance.now();
 });
 socket.on('attack_denied', function () {
   beep({ freq: 220, duration: 0.1, type: 'square', volume: 0.1 });
@@ -253,6 +262,16 @@ function updateBars() {
 }
 
 // ---------- ЭФФЕКТЫ ----------
+function addBloodDecal(slot, zone) {
+  if (!settings.gore) return;
+  if (!bloodDecals[slot]) bloodDecals[slot] = [];
+  const list = bloodDecals[slot];
+  if (list.length > 8) list.shift();
+  const oy = zone === 'head' ? -78 + Math.random() * 10 : zone === 'leg' ? -15 + Math.random() * 10 : -48 + Math.random() * 14;
+  const ox = -8 + Math.random() * 16;
+  list.push({ zone: zone, ox: ox, oy: oy, r: 2.5 + Math.random() * 2.5 });
+}
+
 function spawnHitEffect(p, big, zone) {
   const scale = cssW / 800;
   const px = p.x * scale;
@@ -410,7 +429,8 @@ function drawArenaBackground(groundY) {
   ctx.stroke();
 }
 
-function drawFighter(p, groundY, scale, isBlocking, isAttacking, swingT, zone) {
+function drawFighter(p, groundY, scale, isAttacking, swingT, zone) {
+  const isBlocking = p.blockingBody || p.blockingHead;
   const x = p.x * scale;
   const y = groundY;
   const color = p.slot === 0 ? '#3f8a5c' : '#a13f3f';
@@ -436,7 +456,8 @@ function drawFighter(p, groundY, scale, isBlocking, isAttacking, swingT, zone) {
   }
   const legSwingIdle = moving ? Math.sin(walkPhase[p.slot]) * 7 : 0;
   const bob = moving ? Math.abs(Math.sin(walkPhase[p.slot])) * 3 : 0;
-  const blockGlow = blockFlash[p.slot] && performance.now() - blockFlash[p.slot] < 200;
+  const blockGlow = (blockFlashBody[p.slot] && performance.now() - blockFlashBody[p.slot] < 200) ||
+                     (blockFlashHead[p.slot] && performance.now() - blockFlashHead[p.slot] < 200);
 
   const kicking = isAttacking && zone === 'leg';
   const kickExt = kicking ? Math.sin(swingT * Math.PI) : 0;
@@ -493,6 +514,16 @@ function drawFighter(p, groundY, scale, isBlocking, isAttacking, swingT, zone) {
 
   ctx.fillStyle = colorDark;
   ctx.fillRect(x - 13, shB - 2, 26, 10);
+
+  // накопленные пятна крови (только при включённой расчленёнке)
+  if (settings.gore && bloodDecals[p.slot]) {
+    bloodDecals[p.slot].forEach(function (d) {
+      ctx.fillStyle = 'rgba(122,13,26,0.75)';
+      ctx.beginPath();
+      ctx.ellipse(x + d.ox, y + d.oy - bob, d.r, d.r * 1.4, 0, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  }
 
   ctx.fillStyle = skinDark;
   ctx.fillRect(x - p.facing * 21 - 3, y - 63 - bob, 6, 12);
@@ -588,7 +619,7 @@ function pushHistory() {
   const snap = { p: {} };
   Object.keys(players).forEach(function (id) {
     const p = players[id];
-    snap.p[p.slot] = { x: p.x, facing: p.facing, blocking: p.blocking };
+    snap.p[p.slot] = { x: p.x, facing: p.facing, blockingBody: p.blockingBody, blockingHead: p.blockingHead };
   });
   snap.atkSlot = attackFlashSlot;
   snap.atkZone = attackFlashZone;
@@ -616,8 +647,8 @@ function drawReplay(groundY, scale) {
   [p0, p1].forEach(function (pd, slot) {
     if (!pd) return;
     const isAtk = frame.atkSlot === slot;
-    drawFighter({ x: pd.x, facing: pd.facing, slot: slot, blocking: pd.blocking, knockedOut: false },
-      groundY, scale, pd.blocking, isAtk, frame.atkT, frame.atkZone);
+    drawFighter({ x: pd.x, facing: pd.facing, slot: slot, blockingBody: pd.blockingBody, blockingHead: pd.blockingHead, knockedOut: false },
+      groundY, scale, isAtk, frame.atkT, frame.atkZone);
   });
   ctx.restore();
 
@@ -731,7 +762,7 @@ function draw() {
       if (isAttacking && attackStartTime[p.slot]) {
         swingT = Math.min((performance.now() - attackStartTime[p.slot]) / 220, 1);
       }
-      drawFighter(p, groundY, scale, p.blocking, isAttacking, swingT, isAttacking ? attackFlashZone : null);
+      drawFighter(p, groundY, scale, isAttacking, swingT, isAttacking ? attackFlashZone : null);
     });
     updateParticles();
     drawParticles();
@@ -777,46 +808,59 @@ function handleMove(e) {
 }
 function handleEnd() { dragging = false; currentDir = 0; knob.style.left = '30px'; stopMoveLoop(); }
 
-zone.addEventListener('touchstart', handleStart);
-zone.addEventListener('touchmove', handleMove);
-zone.addEventListener('touchend', handleEnd);
-zone.addEventListener('mousedown', handleStart);
-window.addEventListener('mousemove', handleMove);
-window.addEventListener('mouseup', handleEnd);
+zone.style.touchAction = 'none';
+zone.addEventListener('pointerdown', function (e) { handleStart(); zone.setPointerCapture && zone.setPointerCapture(e.pointerId); });
+zone.addEventListener('pointermove', handleMove);
+zone.addEventListener('pointerup', handleEnd);
+zone.addEventListener('pointercancel', handleEnd);
+zone.addEventListener('pointerleave', handleEnd);
 
-// ---------- БЛОК ----------
-const blockBtn = document.getElementById('block-btn');
-function blockStart(e) {
-  e.preventDefault();
-  ensureAudio();
-  blockBtn.classList.add('active');
-  socket.emit('block_start');
+// ---------- БЛОК (L2 = тело, R2 = голова) ----------
+function bindHoldButton(el, onStart, onEnd) {
+  el.style.touchAction = 'none';
+  el.addEventListener('pointerdown', function (e) {
+    e.preventDefault();
+    el.setPointerCapture && el.setPointerCapture(e.pointerId);
+    ensureAudio();
+    el.classList.add('active');
+    onStart();
+  });
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach(function (evt) {
+    el.addEventListener(evt, function (e) {
+      e.preventDefault();
+      el.classList.remove('active');
+      onEnd();
+    });
+  });
 }
-function blockEnd(e) {
-  if (e) e.preventDefault();
-  blockBtn.classList.remove('active');
-  socket.emit('block_end');
-}
-blockBtn.addEventListener('touchstart', blockStart);
-blockBtn.addEventListener('touchend', blockEnd);
-blockBtn.addEventListener('mousedown', blockStart);
-blockBtn.addEventListener('mouseup', blockEnd);
 
-// ---------- КНОПКИ АТАКИ ПО ЗОНАМ ----------
-function makeAttackHandler(zoneName) {
-  return function (e) {
+const l2Btn = document.getElementById('l2-btn');
+const r2Btn = document.getElementById('r2-btn');
+bindHoldButton(l2Btn,
+  function () { socket.emit('block_start', { zone: 'body' }); },
+  function () { socket.emit('block_end', { zone: 'body' }); });
+bindHoldButton(r2Btn,
+  function () { socket.emit('block_start', { zone: 'head' }); },
+  function () { socket.emit('block_end', { zone: 'head' }); });
+
+// ---------- УДАРЫ: △ правая рука (голова), □ левая рука (тело), ✕ правая нога, ○ левая нога ----------
+function bindTapButton(el, onTap) {
+  el.style.touchAction = 'none';
+  el.addEventListener('pointerdown', function (e) {
     e.preventDefault();
     ensureAudio();
-    if (countdown) return;
-    socket.emit('attack', { zone: zoneName });
-  };
+    el.classList.add('active');
+    if (!countdown) onTap();
+    setTimeout(function () { el.classList.remove('active'); }, 120);
+  });
 }
-const legBtn = document.getElementById('leg-btn');
-const bodyBtn = document.getElementById('body-btn');
-const headBtn = document.getElementById('head-btn');
-legBtn.addEventListener('touchstart', makeAttackHandler('leg'));
-legBtn.addEventListener('mousedown', makeAttackHandler('leg'));
-bodyBtn.addEventListener('touchstart', makeAttackHandler('body'));
-bodyBtn.addEventListener('mousedown', makeAttackHandler('body'));
-headBtn.addEventListener('touchstart', makeAttackHandler('head'));
-headBtn.addEventListener('mousedown', makeAttackHandler('head'));
+
+bindTapButton(document.getElementById('tri-btn'), function () { socket.emit('attack', { zone: 'head' }); });
+bindTapButton(document.getElementById('sq-btn'), function () { socket.emit('attack', { zone: 'body' }); });
+bindTapButton(document.getElementById('cross-btn'), function () { socket.emit('attack', { zone: 'leg' }); });
+bindTapButton(document.getElementById('circle-btn'), function () { socket.emit('attack', { zone: 'leg' }); });
+
+// ---------- УСИЛЕННЫЕ УДАРЫ: L1 = мощный по голове, R1 = мощный по ногам ----------
+bindTapButton(document.getElementById('l1-btn'), function () { socket.emit('attack', { zone: 'head', power: true }); });
+bindTapButton(document.getElementById('r1-btn'), function () { socket.emit('attack', { zone: 'leg', power: true }); });
+
