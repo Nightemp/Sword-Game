@@ -1,368 +1,206 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Sword Duel</title>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+<title>Кулачный бой</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
   html, body {
-    margin: 0;
-    padding: 0;
-    width: 100%;
-    height: 100%;
-    background: #14100e;
-    overflow: hidden;
-    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-    color: #fff;
-    user-select: none;
-    touch-action: none;
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: #060402; font-family: sans-serif; touch-action: none;
+    -webkit-user-select: none; user-select: none;
   }
+  #arena-wrap { position: relative; width: 100%; height: 60vh; overflow: hidden; }
+  #arena { display: block; width: 100%; height: 100%; }
+  #hud { position: absolute; top: 8px; left: 0; right: 0; display: flex; justify-content: space-between; padding: 0 14px; z-index: 5; }
+  .zone-bars { width: 44%; }
+  .zone-bars.right { text-align: right; }
+  .zone-label { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+  .zone-bars.right .zone-label { flex-direction: row-reverse; }
+  .zone-name { font-size: 9px; color: #ccc; width: 32px; }
+  .zone-bar { flex: 1; height: 8px; background: #1a1410; border-radius: 4px; overflow: hidden; border: 1px solid #000; }
+  .zone-fill { height: 100%; background: linear-gradient(#ff5f5f, #b8102a); transition: width 0.15s linear; }
+  .stamina-bar { height: 6px; background: #1a1410; border-radius: 3px; overflow: hidden; border: 1px solid #000; margin-top: 3px; }
+  .stamina-fill { height: 100%; background: linear-gradient(#7ed957, #2e8b3f); transition: width 0.15s linear; }
+  #win-counters { position: absolute; top: 72px; left: 0; right: 0; display: flex; justify-content: space-between; padding: 0 14px; z-index: 5; font-size: 11px; color: #ffe066; }
 
-  #arena {
-    display: block;
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(#3a2f28, #6b5644);
+  #controls {
+    position: fixed; bottom: 0; left: 0; right: 0; height: 40vh;
+    display: flex; flex-direction: column; justify-content: flex-end;
+    padding: 6px 12px 10px; box-sizing: border-box; background: linear-gradient(#0c0906, #050302);
   }
-
-  #status {
-    position: absolute;
-    top: 100px;
-    left: 50%;
-    transform: translateX(-50%);
-    font-size: 18px;
-    font-weight: bold;
-    text-shadow: 0 2px 4px rgba(0,0,0,0.8);
-    pointer-events: none;
-    z-index: 5;
+  #shoulder-row { display: flex; justify-content: space-between; padding: 0 4px 8px; }
+  .shoulder-pair { display: flex; flex-direction: column; gap: 6px; }
+  .shoulder-btn {
+    width: 70px; height: 32px; border-radius: 8px; color: white; font-size: 9px; font-weight: bold;
+    display: flex; align-items: center; justify-content: center; border: 2px solid; text-align: center; line-height: 1.1;
+    box-shadow: 0 3px 8px rgba(0,0,0,0.5);
   }
+  #l2-btn { background: radial-gradient(circle at 35% 30%, #5a8fd6, #22447a); border-color: #14294a; }
+  #r2-btn { background: radial-gradient(circle at 35% 30%, #d65a8f, #7a2244); border-color: #4a1429; }
+  #l1-btn { background: radial-gradient(circle at 35% 30%, #d6a95a, #7a5822); border-color: #4a3414; }
+  #r1-btn { background: radial-gradient(circle at 35% 30%, #d6a95a, #7a5822); border-color: #4a3414; }
+  .shoulder-btn.active { filter: brightness(1.4); }
 
-  .hp-group {
-    position: absolute;
-    top: 10px;
-    width: 38%;
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-  }
-  #hp-group-0 { left: 10px; }
-  #hp-group-1 { right: 10px; align-items: flex-end; }
-
-  .hp-name {
-    font-size: 11px;
-    font-weight: bold;
-    color: rgba(255,255,255,0.85);
-    text-shadow: 0 1px 3px rgba(0,0,0,0.9);
-    margin-bottom: 1px;
-    max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .hp-row {
-    display: flex;
-    align-items: center;
-    width: 100%;
-    gap: 5px;
-  }
-  #hp-group-1 .hp-row { flex-direction: row-reverse; }
-
-  .hp-label {
-    font-size: 10px;
-    font-weight: bold;
-    width: 12px;
-    text-align: center;
-    color: rgba(255,255,255,0.7);
-    text-shadow: 0 1px 2px rgba(0,0,0,0.8);
-  }
-
-  .hp-container {
-    flex: 1;
-    height: 9px;
-    background: rgba(0,0,0,0.5);
-    border: 1.5px solid rgba(255,255,255,0.8);
-    border-radius: 5px;
-    overflow: hidden;
-  }
-
-  .hp-bar {
-    height: 100%;
-    width: 100%;
-    transition: width 0.15s ease-out;
-  }
-
-  .hp-head { background: #e0b88a; }
-  .hp-torso-0 { background: #4a7c59; }
-  .hp-torso-1 { background: #7c4a4a; }
-  .hp-legs { background: #6b5342; }
-
-  #stamina-wrap {
-    position: absolute;
-    left: 24px;
-    bottom: 195px;
-    width: 130px;
-    height: 8px;
-    background: rgba(0,0,0,0.5);
-    border: 1.5px solid rgba(255,255,255,0.6);
-    border-radius: 4px;
-    overflow: hidden;
-    display: none;
-  }
-  #stamina-bar {
-    height: 100%;
-    width: 100%;
-    background: linear-gradient(#ffe066, #d9a521);
-    transition: width 0.15s ease-out, background-color 0.2s;
-  }
-
+  #main-row { display: flex; justify-content: space-between; align-items: center; }
   #joystick-zone {
-    position: absolute;
-    left: 24px;
-    bottom: 50px;
-    width: 130px;
-    height: 130px;
-    border-radius: 50%;
-    background: rgba(255,255,255,0.15);
-    border: 2px solid rgba(255,255,255,0.3);
+    width: 108px; height: 108px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(255,255,255,0.1), rgba(255,255,255,0.02));
+    position: relative; border: 1px solid rgba(255,255,255,0.15);
   }
   #joystick-knob {
-    position: absolute;
-    left: 51px;
-    top: 51px;
-    width: 28px;
-    height: 28px;
-    border-radius: 50%;
-    background: rgba(255,255,255,0.8);
+    width: 48px; height: 48px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #fff, #999);
+    position: absolute; top: 30px; left: 30px; pointer-events: none;
+    box-shadow: 0 3px 8px rgba(0,0,0,0.5);
   }
 
-  #attack-btn {
-    position: absolute;
-    right: 24px;
-    bottom: 50px;
-    width: 110px;
-    height: 110px;
-    border-radius: 50%;
-    background: rgba(255,80,80,0.35);
-    border: 2px solid rgba(255,120,120,0.6);
-    color: #fff;
-    font-size: 15px;
-    font-weight: bold;
-    transition: opacity 0.2s;
+  #diamond { position: relative; width: 150px; height: 150px; }
+  .face-btn {
+    position: absolute; width: 52px; height: 52px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px; font-weight: bold; color: white; border: 3px solid;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.6);
+  }
+  .face-btn.active { filter: brightness(1.4); }
+  #tri-btn { top: 0; left: 49px; background: radial-gradient(circle at 35% 30%, #6fd68a, #1f7a3d); border-color: #144a24; }
+  #sq-btn { top: 49px; left: 0; background: radial-gradient(circle at 35% 30%, #d68acb, #7a2266); border-color: #4a1445; }
+  #cross-btn { top: 98px; left: 49px; background: radial-gradient(circle at 35% 30%, #7ab0e6, #22497a); border-color: #142e4a; }
+  #circle-btn { top: 49px; left: 98px; background: radial-gradient(circle at 35% 30%, #e67a7a, #7a2222); border-color: #4a1414; }
+  #status { position: absolute; top: 38%; left: 0; right: 0; text-align: center; color: #ffe066; font-size: 22px; text-shadow: 0 2px 8px #000; z-index: 5; }
+
+  #ko-screen {
+    position: absolute; inset: 0; z-index: 40; display: none;
+    align-items: center; justify-content: center; flex-direction: column; gap: 16px;
+    background: rgba(0,0,0,0.55);
+  }
+  #ko-screen.show { display: flex; }
+  #ko-title { font-size: 30px; font-weight: bold; color: #ff3b3b; text-shadow: 0 3px 10px #000; letter-spacing: 2px; }
+  #ko-sub { color: #eee; font-size: 14px; }
+  #rematch-btn {
+    padding: 12px 36px; font-size: 15px; font-weight: bold; color: white;
+    background: linear-gradient(#ff5a5a, #a91d1d); border: 2px solid #6e1010;
+    border-radius: 12px;
   }
 
-  #kick-btn {
-    position: absolute;
-    right: 148px;
-    bottom: 50px;
-    width: 84px;
-    height: 84px;
-    border-radius: 50%;
-    background: rgba(255,170,60,0.3);
-    border: 2px solid rgba(255,190,100,0.6);
-    color: #fff;
-    font-size: 13px;
-    font-weight: bold;
-    transition: opacity 0.2s;
+  #menu-screen {
+    position: fixed; inset: 0; z-index: 50;
+    background: radial-gradient(ellipse at top, #3a2f28, #060402 80%);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    color: #eee; text-align: center; gap: 18px;
   }
-
-  #takedown-btn {
-    position: absolute;
-    right: 78px;
-    bottom: 148px;
-    width: 84px;
-    height: 84px;
-    border-radius: 50%;
-    background: rgba(160,90,220,0.3);
-    border: 2px solid rgba(190,130,240,0.6);
-    color: #fff;
-    font-size: 11px;
-    font-weight: bold;
-    transition: opacity 0.2s;
-  }
-
-  .btn-disabled {
-    opacity: 0.35;
-  }
-
-  #escape-wrap {
-    position: absolute;
-    left: 50%;
-    transform: translateX(-50%);
-    bottom: 210px;
-    width: 200px;
-    display: none;
-    text-align: center;
-    z-index: 6;
-  }
-  #escape-label {
-    font-size: 13px;
-    font-weight: bold;
-    color: #ffe066;
-    text-shadow: 0 2px 4px rgba(0,0,0,0.8);
-    margin-bottom: 4px;
-  }
-  #escape-bar-wrap {
-    height: 10px;
-    background: rgba(0,0,0,0.5);
-    border: 1.5px solid rgba(255,255,255,0.6);
-    border-radius: 5px;
-    overflow: hidden;
-  }
-  #escape-bar {
-    height: 100%;
-    width: 0%;
-    background: linear-gradient(#ffe066, #d9a521);
-    transition: width 0.1s;
-  }
-
-  #hit-flash {
-    position: absolute;
-    top: 0; left: 0; width: 100%; height: 100%;
-    background: radial-gradient(rgba(180,0,0,0.45), rgba(120,0,0,0.1) 70%);
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.1s;
-    z-index: 4;
-  }
-
-  #menu-overlay {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(#1c1512, #3a2f28);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    z-index: 10;
-  }
-
-  #menu-title {
-    font-size: 34px;
-    font-weight: bold;
-    letter-spacing: 1px;
-    margin-bottom: 6px;
-    text-shadow: 0 3px 6px rgba(0,0,0,0.6);
-  }
-
-  #menu-subtitle {
-    font-size: 14px;
-    color: rgba(255,255,255,0.6);
-    margin-bottom: 40px;
-    text-align: center;
-    padding: 0 30px;
-    line-height: 1.5;
-  }
-
+  #menu-screen h1 { font-size: 26px; margin: 0; letter-spacing: 1px; color: #ffe066; text-shadow: 0 2px 10px #000; }
+  #menu-stats { font-size: 14px; color: #ccc; display: flex; gap: 18px; }
+  #menu-stats span { color: #ffe066; font-weight: bold; }
   #play-btn {
-    width: 220px;
-    height: 60px;
-    border-radius: 30px;
-    background: linear-gradient(#ffe066, #e0a824);
-    border: none;
-    color: #1a1410;
-    font-size: 20px;
-    font-weight: bold;
-    letter-spacing: 1px;
-    box-shadow: 0 6px 16px rgba(0,0,0,0.4);
+    padding: 16px 48px; font-size: 18px; font-weight: bold; color: white;
+    background: linear-gradient(#ff5a5a, #a91d1d); border: 2px solid #6e1010;
+    border-radius: 12px; box-shadow: 0 6px 16px rgba(0,0,0,0.5);
+  }
+  #settings-btn {
+    width: 44px; height: 44px; border-radius: 50%; background: rgba(255,255,255,0.1);
+    color: white; font-size: 20px; border: 1px solid rgba(255,255,255,0.2);
+    position: absolute; top: 20px; right: 20px; display: flex; align-items: center; justify-content: center;
   }
 
-  #play-btn:active {
-    transform: scale(0.97);
+  #settings-modal {
+    position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,0.75);
+    display: none; align-items: center; justify-content: center;
   }
-
-  #bot-btn {
-    width: 220px;
-    height: 54px;
-    border-radius: 27px;
-    background: rgba(255,255,255,0.1);
-    border: 2px solid rgba(255,255,255,0.4);
-    color: #fff;
-    font-size: 17px;
-    font-weight: bold;
-    letter-spacing: 1px;
-    margin-top: 14px;
+  #settings-modal.open { display: flex; }
+  #settings-box {
+    background: #241c16; border: 1px solid #4a3a2c; border-radius: 14px;
+    padding: 22px; width: 82%; max-width: 340px; color: #eee;
   }
-  #bot-btn:active {
-    transform: scale(0.97);
-  }
-
-  #online-counter {
-    margin-top: 24px;
-    font-size: 13px;
-    color: rgba(255,255,255,0.5);
-  }
-  #online-counter span {
-    color: #ffe066;
-    font-weight: bold;
-  }
+  #settings-box h2 { margin: 0 0 16px 0; font-size: 18px; color: #ffe066; }
+  .setting-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-top: 1px solid #3a2f28; }
+  .setting-row:first-of-type { border-top: none; }
+  .toggle { width: 46px; height: 26px; border-radius: 13px; background: #444; position: relative; flex-shrink: 0; }
+  .toggle.on { background: #d62828; }
+  .toggle-knob { width: 20px; height: 20px; border-radius: 50%; background: white; position: absolute; top: 3px; left: 3px; transition: left 0.15s; }
+  .toggle.on .toggle-knob { left: 23px; }
+  #close-settings { margin-top: 18px; width: 100%; padding: 10px; background: #4a3a2c; color: white; border: none; border-radius: 8px; }
 </style>
 </head>
 <body>
-
-<canvas id="arena"></canvas>
-<div id="hit-flash"></div>
-<div id="status"></div>
-
-<div class="hp-group" id="hp-group-0">
-  <div class="hp-name" id="name-0">Игрок 1</div>
-  <div class="hp-row">
-    <span class="hp-label">Г</span>
-    <div class="hp-container"><div class="hp-bar hp-head" id="hp0-head"></div></div>
+  <div id="menu-screen">
+    <button id="settings-btn">⚙️</button>
+    <h1>🥊 Кулачный бой</h1>
+    <div id="menu-stats">
+      <div>Онлайн: <span id="stat-online">—</span></div>
+      <div>Сыграно боёв: <span id="stat-games">—</span></div>
+    </div>
+    <button id="play-btn">Играть</button>
   </div>
-  <div class="hp-row">
-    <span class="hp-label">Т</span>
-    <div class="hp-container"><div class="hp-bar hp-torso-0" id="hp0-torso"></div></div>
+
+  <div id="settings-modal">
+    <div id="settings-box">
+      <h2>Настройки</h2>
+      <div class="setting-row">
+        <span>Звук</span>
+        <div class="toggle on" id="toggle-sound"><div class="toggle-knob"></div></div>
+      </div>
+      <div class="setting-row">
+        <span>Расчленёнка</span>
+        <div class="toggle" id="toggle-gore"><div class="toggle-knob"></div></div>
+      </div>
+      <button id="close-settings">Закрыть</button>
+    </div>
   </div>
-  <div class="hp-row">
-    <span class="hp-label">Н</span>
-    <div class="hp-container"><div class="hp-bar hp-legs" id="hp0-legs"></div></div>
+
+  <div id="hud">
+    <div class="zone-bars">
+      <div class="zone-label"><span class="zone-name">Голова</span><div class="zone-bar"><div id="head0" class="zone-fill" style="width:100%"></div></div></div>
+      <div class="zone-label"><span class="zone-name">Тело</span><div class="zone-bar"><div id="body0" class="zone-fill" style="width:100%"></div></div></div>
+      <div class="zone-label"><span class="zone-name">Ноги</span><div class="zone-bar"><div id="legs0" class="zone-fill" style="width:100%"></div></div></div>
+      <div class="stamina-bar"><div id="st0" class="stamina-fill" style="width:100%"></div></div>
+    </div>
+    <div class="zone-bars right">
+      <div class="zone-label"><span class="zone-name">Голова</span><div class="zone-bar"><div id="head1" class="zone-fill" style="width:100%"></div></div></div>
+      <div class="zone-label"><span class="zone-name">Тело</span><div class="zone-bar"><div id="body1" class="zone-fill" style="width:100%"></div></div></div>
+      <div class="zone-label"><span class="zone-name">Ноги</span><div class="zone-bar"><div id="legs1" class="zone-fill" style="width:100%"></div></div></div>
+      <div class="stamina-bar"><div id="st1" class="stamina-fill" style="width:100%"></div></div>
+    </div>
   </div>
-</div>
-
-<div class="hp-group" id="hp-group-1">
-  <div class="hp-name" id="name-1">Игрок 2</div>
-  <div class="hp-row">
-    <span class="hp-label">Г</span>
-    <div class="hp-container"><div class="hp-bar hp-head" id="hp1-head"></div></div>
+  <div id="win-counters">
+    <div>Победы: <span id="wins0">0</span></div>
+    <div>Победы: <span id="wins1">0</span></div>
   </div>
-  <div class="hp-row">
-    <span class="hp-label">Т</span>
-    <div class="hp-container"><div class="hp-bar hp-torso-1" id="hp1-torso"></div></div>
+
+  <div id="arena-wrap">
+    <canvas id="arena"></canvas>
+    <div id="ko-screen">
+      <div id="ko-title">НОКАУТ</div>
+      <div id="ko-sub"></div>
+      <button id="rematch-btn">Играть снова</button>
+    </div>
   </div>
-  <div class="hp-row">
-    <span class="hp-label">Н</span>
-    <div class="hp-container"><div class="hp-bar hp-legs" id="hp1-legs"></div></div>
+  <div id="status"></div>
+
+  <div id="controls">
+    <div id="shoulder-row">
+      <div class="shoulder-pair">
+        <div id="l1-btn" class="shoulder-btn">L1 ГОЛОВА+</div>
+        <div id="l2-btn" class="shoulder-btn">L2 БЛОК ТЕЛО</div>
+      </div>
+      <div class="shoulder-pair">
+        <div id="r1-btn" class="shoulder-btn">R1 НОГИ+</div>
+        <div id="r2-btn" class="shoulder-btn">R2 БЛОК ГОЛОВА</div>
+      </div>
+    </div>
+    <div id="main-row">
+      <div id="joystick-zone"><div id="joystick-knob"></div></div>
+      <div id="diamond">
+        <div id="tri-btn" class="face-btn">△</div>
+        <div id="sq-btn" class="face-btn">□</div>
+        <div id="cross-btn" class="face-btn">✕</div>
+        <div id="circle-btn" class="face-btn">○</div>
+      </div>
+    </div>
   </div>
-</div>
 
-<div id="stamina-wrap"><div id="stamina-bar"></div></div>
-
-<div id="escape-wrap">
-  <div id="escape-label">ВЫРВИСЬ! (тапай)</div>
-  <div id="escape-bar-wrap"><div id="escape-bar"></div></div>
-</div>
-
-<div id="joystick-zone">
-  <div id="joystick-knob"></div>
-</div>
-<button id="kick-btn">ПИНОК</button>
-<button id="takedown-btn">ТЕЙКДАУН</button>
-<button id="attack-btn">МЕЧ</button>
-
-<div id="menu-overlay">
-  <div id="menu-title">⚔️ SWORD DUEL</div>
-  <div id="menu-subtitle">Джойстик — движение. «МЕЧ»/«ПИНОК» — стоя, «ТЕЙКДАУН» — свалить соперника и добивать на полу.<br>Соперник может вырваться, если часто тапать.<br>Следи за выносливостью.</div>
-  <button id="play-btn">ИГРОК vs ИГРОК</button>
-  <button id="bot-btn">ИГРОК vs БОТ</button>
-  <div id="online-counter">Сейчас играют: <span id="online-count">—</span></div>
-</div>
-
-<script src="/socket.io/socket.io.js"></script>
-<script src="game.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="game.js"></script>
 </body>
 </html>
